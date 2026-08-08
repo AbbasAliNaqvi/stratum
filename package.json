@@ -10,9 +10,13 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=@stratum/control-plane",
+    "start": "npm run start --workspace=@stratum/control-plane",
     "test": "npm run test --workspaces",
     "lint": "npm run lint --workspaces",
-    "format": "npm run format --workspaces"
+    "format": "npm run format --workspaces",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
   "engines": {
     "node": ">=22"

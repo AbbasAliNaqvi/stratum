@@ -1,6 +1,9 @@
 import { z } from "zod";
+import dotenv from "dotenv";
 
-import { loadEnv } from "@stratum/config";
+dotenv.config({
+  path: new URL("../../../.env", import.meta.url)
+});
 
 const EnvSchema = z.object({
   NODE_ENV: z
@@ -20,7 +23,21 @@ const EnvSchema = z.object({
 
   DATABASE_URL: z
     .string()
-    .min(1, "DATABASE_URL is required"),
+    .min(1, "DATABASE_URL is required")
 });
 
-export const config = loadEnv(EnvSchema);
+const result = EnvSchema.safeParse(process.env);
+
+if (!result.success) {
+  console.error("Invalid environment configuration:");
+
+  for (const issue of result.error.issues) {
+    console.error(
+      `- ${issue.path.join(".")}: ${issue.message}`
+    );
+  }
+
+  process.exit(1);
+}
+
+export const config = result.data;

@@ -7,17 +7,17 @@ import * as schema from "./schema.js";
 const { Pool } = pg;
 
 export const pool = new Pool({
-  connectionString: config.DATABASE_URL,
+  connectionString: config.DATABASE_URL
 });
 
 export const db = drizzle(pool, {
-  schema,
+  schema
 });
 
-export async function checkDbConnection() {
+export async function checkDatabaseConnection() {
   await pool.query("SELECT 1");
 }
 
-export async function closeDb() {
+export async function closeDatabase() {
   await pool.end();
 }
