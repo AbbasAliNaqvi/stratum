@@ -1,8 +1,14 @@
 import { buildApp } from "./app.js";
 import { config } from "./config.js";
 import { closeDatabase } from "./db/client.js";
+import { printShutdown, printStartup } from "@stratum/logger/console";
+import { startNodeLivenessMonitor } from "./modules/nodes/monitor.js";
 
 const app = buildApp();
+
+const stopNodeLivenessMonitor = startNodeLivenessMonitor(
+  app.log
+);
 
 async function start() {
   try {
@@ -11,9 +17,11 @@ async function start() {
       port: config.CONTROL_PLANE_PORT
     });
 
-    app.log.info(
-      `Control plane running on http://${config.CONTROL_PLANE_HOST}:${config.CONTROL_PLANE_PORT}`
-    );
+    printStartup({
+      host: config.CONTROL_PLANE_HOST,
+      port: config.CONTROL_PLANE_PORT,
+      database: "PostgreSQL"
+    });
   } catch (error) {
     app.log.error(error);
     await closeDatabase();
@@ -22,11 +30,20 @@ async function start() {
 }
 
 async function shutdown(signal) {
-  app.log.info(`${signal} received. Shutting down...`);
+  printShutdown();
+
+  app.log.info(`${signal} received`);
 
   try {
+    stopNodeLivenessMonitor();
+    app.log.info("Closing HTTP server...");
     await app.close();
+
+    app.log.info("Closing PostgreSQL pool...");
     await closeDatabase();
+
+    app.log.info("Stratum stopped cleanly");
+
     process.exit(0);
   } catch (error) {
     app.log.error(error);

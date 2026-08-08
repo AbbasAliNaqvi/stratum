@@ -23,7 +23,21 @@ const EnvSchema = z.object({
 
   DATABASE_URL: z
     .string()
-    .min(1, "DATABASE_URL is required")
+    .min(1, "DATABASE_URL is required"),
+
+  HEARTBEAT_TIMEOUT_MS: z
+    .coerce
+    .number()
+    .int()
+    .positive()
+    .default(30000),
+
+  HEARTBEAT_CHECK_INTERVAL_MS: z
+    .coerce
+    .number()
+    .int()
+    .positive()
+    .default(5000)
 });
 
 const result = EnvSchema.safeParse(process.env);
