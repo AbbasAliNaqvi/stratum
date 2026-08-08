@@ -1,6 +1,12 @@
 {
   "name": "@stratum/contracts",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module"
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
 }
