@@ -48,6 +48,8 @@ export const NodeSchema = z.object({
 
   status: z.enum(NODE_STATUSES),
 
+  lastHeartbeatAt: z.string(),
+
   createdAt: z.string(),
 
   updatedAt: z.string(),

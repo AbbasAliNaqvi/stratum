@@ -42,7 +42,8 @@ export async function nodeRoutes(app) {
     return NodeSchema.parse({
       ...node,
       createdAt: node.createdAt.toISOString(),
-      updatedAt: node.updatedAt.toISOString()
+      updatedAt: node.updatedAt.toISOString(),
+      lastHeartbeatAt: node.lastHeartbeatAt.toISOString()
     });
   });
   app.post("/nodes", async (request, reply) => {
@@ -65,7 +66,8 @@ export async function nodeRoutes(app) {
         NodeSchema.parse({
           ...node,
           createdAt: node.createdAt.toISOString(),
-          updatedAt: node.updatedAt.toISOString()
+          updatedAt: node.updatedAt.toISOString(),
+          lastHeartbeatAt: node.lastHeartbeatAt.toISOString()
         })
       );
     } catch (error) {
@@ -101,7 +103,8 @@ export async function nodeRoutes(app) {
         NodeSchema.parse({
           ...node,
           createdAt: node.createdAt.toISOString(),
-          updatedAt: node.updatedAt.toISOString()
+          updatedAt: node.updatedAt.toISOString(),
+          lastHeartbeatAt: node.lastHeartbeatAt.toISOString()
         })
       );
     } catch (error) {

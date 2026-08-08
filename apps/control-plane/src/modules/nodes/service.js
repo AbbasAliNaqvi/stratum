@@ -38,6 +38,7 @@ export async function heartbeatNode(nodeId) {
     .update(nodes)
     .set({
       status: "registered",
+      lastHeartbeatAt: now ,
       updatedAt: now
     })
     .where(eq(nodes.nodeId, nodeId))

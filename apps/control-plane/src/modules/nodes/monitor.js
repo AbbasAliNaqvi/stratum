@@ -19,7 +19,7 @@ export function startNodeLivenessMonitor(logger) {
         .where(
           and(
             eq(nodes.status, "registered"),
-            lt(nodes.updatedAt, cutoff)
+            lt(nodes.lastHeartbeatAt, cutoff)
           )
         )
         .returning({
