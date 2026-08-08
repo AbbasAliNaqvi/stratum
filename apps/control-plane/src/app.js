@@ -4,6 +4,7 @@ import { LogController } from "fastify";
 import { logger } from "@stratum/logger";
 import { healthRoutes } from "./modules/health/routes.js";
 import { nodeRoutes } from "./modules/nodes/routes.js";
+import { jobRoutes } from "./modules/jobs/routes.js";
 
 class StratumLogController extends LogController {
   constructor() {
@@ -45,6 +46,7 @@ export function buildApp() {
 
   app.register(healthRoutes);
   app.register(nodeRoutes);
+  app.register(jobRoutes);
 
   return app;
 }

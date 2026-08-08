@@ -15,6 +15,13 @@
       "when": 1786208371690,
       "tag": "0001_eminent_lester",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786217712511,
+      "tag": "0002_loose_grim_reaper",
+      "breakpoints": true
     }
   ]
 }
