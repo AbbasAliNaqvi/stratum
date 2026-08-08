@@ -1,0 +1,14 @@
+{
+  "name": "@stratum/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "stratum": "./bin/stratum.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  }
+}
