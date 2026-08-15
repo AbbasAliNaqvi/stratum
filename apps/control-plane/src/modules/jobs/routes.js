@@ -2,7 +2,8 @@ import {
   createJob,
   getJob,
   getJobs,
-  claimJob
+  claimJob,
+  completeJob,
 } from "./service.js";
 
 import { config } from "../../config.js";
@@ -63,6 +64,42 @@ export async function jobRoutes(app) {
 
       return reply.code(500).send({
         error: "Failed to claim job"
+      });
+    }
+  });
+
+  app.post("/jobs/:id/complete", async (request, reply) => {
+    try {
+      const { nodeId, leaseToken, result } = request.body ?? {};
+
+      if (!nodeId || leaseToken === undefined) {
+        return reply.code(400).send({
+          error: "nodeId and leaseToken are required",
+        });
+      }
+
+      const completed = await completeJob({
+        jobId: request.params.id,
+        nodeId,
+        leaseToken,
+        result,
+      });
+
+      if (!completed) {
+        return reply.code(409).send({
+          error: "Job completion rejected: lease is invalid or expired",
+        });
+      }
+
+      return reply.send({
+        job: completed.job,
+        event: completed.event,
+      });
+    } catch (error) {
+      request.log.error(error);
+
+      return reply.code(500).send({
+        error: "Failed to complete job",
       });
     }
   });

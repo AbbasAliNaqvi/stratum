@@ -1,8 +1,14 @@
-import { lt, eq, and } from "drizzle-orm";
+import {
+  lt,
+  eq,
+  and,
+} from "drizzle-orm";
 
 import { config } from "../../config.js";
 import { db } from "../../db/client.js";
 import { nodes } from "../../db/schema.js";
+import { reclaimJobsForNode } from "../jobs/repository.js";
+
 
 export function startNodeLivenessMonitor(logger) {
   const interval = setInterval(async () => {
@@ -30,10 +36,21 @@ export function startNodeLivenessMonitor(logger) {
         logger.warn(
           `Node ${node.nodeId} marked unreachable`
         );
+
+        const reclaimedJobs =
+          await reclaimJobsForNode(node.nodeId);
+
+        for (const job of reclaimedJobs) {
+          logger.warn(
+            `Job ${job.id} reclaimed from node ${node.nodeId}`
+          );
+        }
       }
     } catch (error) {
       logger.error(
-        { err: error },
+        {
+          err: error,
+        },
         "Node liveness check failed"
       );
     }

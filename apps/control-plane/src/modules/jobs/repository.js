@@ -1,34 +1,16 @@
-import {
-  eq,
-  desc,
-  asc,
-  and,
-  lte,
-  sql
-} from "drizzle-orm";
+import { eq, desc, asc, and, lte, sql, or } from "drizzle-orm";
 
 import { db } from "../../db/client.js";
-import {
-  jobs,
-  jobEvents,
-  nodes
-} from "../../db/schema.js";
+import { jobs, jobEvents, nodes } from "../../db/schema.js";
 
 export async function insertJob(data) {
-  const [job] = await db
-    .insert(jobs)
-    .values(data)
-    .returning();
+  const [job] = await db.insert(jobs).values(data).returning();
 
   return job;
 }
 
 export async function getJobById(id) {
-  const [job] = await db
-    .select()
-    .from(jobs)
-    .where(eq(jobs.id, id))
-    .limit(1);
+  const [job] = await db.select().from(jobs).where(eq(jobs.id, id)).limit(1);
 
   return job ?? null;
 }
@@ -60,7 +42,7 @@ export async function insertJobEvent({
   jobId,
   eventType,
   nodeId = null,
-  message = null
+  message = null,
 }) {
   const [event] = await db
     .insert(jobEvents)
@@ -68,7 +50,7 @@ export async function insertJobEvent({
       jobId,
       eventType,
       nodeId,
-      message
+      message,
     })
     .returning();
 
@@ -77,10 +59,7 @@ export async function insertJobEvent({
 
 export async function createJobWithEvent(jobData, eventData) {
   return db.transaction(async (tx) => {
-    const [job] = await tx
-      .insert(jobs)
-      .values(jobData)
-      .returning();
+    const [job] = await tx.insert(jobs).values(jobData).returning();
 
     const [event] = await tx
       .insert(jobEvents)
@@ -88,11 +67,14 @@ export async function createJobWithEvent(jobData, eventData) {
         jobId: job.id,
         eventType: eventData.eventType,
         nodeId: eventData.nodeId ?? null,
-        message: eventData.message ?? null
+        message: eventData.message ?? null,
       })
       .returning();
 
-    return { job, event };
+    return {
+      job,
+      event,
+    };
   });
 }
 
@@ -114,34 +96,22 @@ export async function getJobByIdempotencyKey(idempotencyKey) {
   return job ?? null;
 }
 
-export async function claimNextJob({
-  nodeId,
-  leaseDurationMs
-}) {
+export async function claimNextJob({ nodeId, leaseDurationMs }) {
   return db.transaction(async (tx) => {
     const now = new Date();
 
-    const leaseExpiresAt = new Date(
-      now.getTime() + leaseDurationMs
-    );
+    const leaseExpiresAt = new Date(now.getTime() + leaseDurationMs);
 
     const [node] = await tx
       .select({
-        nodeId: nodes.nodeId
+        nodeId: nodes.nodeId,
       })
       .from(nodes)
-      .where(
-        and(
-          eq(nodes.nodeId, nodeId),
-          eq(nodes.status, "registered")
-        )
-      )
+      .where(and(eq(nodes.nodeId, nodeId), eq(nodes.status, "registered")))
       .limit(1);
 
     if (!node) {
-      const error = new Error(
-        `Node '${nodeId}' is not registered`
-      );
+      const error = new Error(`Node '${nodeId}' is not registered`);
 
       error.code = "NODE_NOT_REGISTERED";
 
@@ -156,31 +126,92 @@ export async function claimNextJob({
         leaseToken: sql`${jobs.leaseToken} + 1`,
         leaseExpiresAt,
         startedAt: now,
-        updatedAt: now
+        updatedAt: now,
       })
       .where(
         eq(
           jobs.id,
           tx
             .select({
-              id: jobs.id
+              id: jobs.id,
             })
             .from(jobs)
             .where(
               and(
-                eq(jobs.status, "queued"),
-                lte(jobs.runAfter, now)
-              )
+                lte(jobs.runAfter, now),
+                or(
+                  eq(jobs.status, "queued"),
+                  and(
+                    eq(jobs.status, "running"),
+                    sql`${jobs.leaseExpiresAt} <= ${now}`,
+                  ),
+                ),
+              ),
             )
-            .orderBy(
-              desc(jobs.priority),
-              asc(jobs.createdAt)
-            )
+            .orderBy(desc(jobs.priority), asc(jobs.createdAt))
             .limit(1)
             .for("update", {
-              skipLocked: true
-            })
-        )
+              skipLocked: true,
+            }),
+        ),
+      )
+      .returning();
+
+    if (!job) {
+      return null;
+    }
+
+    const eventType = job.leaseToken > 1 ? "reclaimed" : "claimed";
+
+    const message =
+      eventType === "reclaimed"
+        ? `Job reclaimed by node ${nodeId}`
+        : `Job claimed by node ${nodeId}`;
+
+    const [event] = await tx
+      .insert(jobEvents)
+      .values({
+        jobId: job.id,
+        eventType,
+        nodeId,
+        message,
+      })
+      .returning();
+
+    return {
+      job,
+      event,
+    };
+  });
+}
+
+export async function completeJob({
+  jobId,
+  nodeId,
+  leaseToken,
+  result = null,
+}) {
+  return db.transaction(async (tx) => {
+    const now = new Date();
+
+    const [job] = await tx
+      .update(jobs)
+      .set({
+        status: "succeeded",
+        result,
+        finishedAt: now,
+        updatedAt: now,
+        lockedBy: null,
+        leaseExpiresAt: null,
+      })
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.lockedBy, nodeId),
+          eq(jobs.leaseToken, leaseToken),
+          eq(jobs.status, "running"),
+          sql`${jobs.leaseExpiresAt} > ${now}`,
+        ),
       )
       .returning();
 
@@ -192,15 +223,47 @@ export async function claimNextJob({
       .insert(jobEvents)
       .values({
         jobId: job.id,
-        eventType: "claimed",
+        eventType: "completed",
         nodeId,
-        message: `Job claimed by node ${nodeId}`
+        message: `Job completed by node ${nodeId}`,
       })
       .returning();
 
     return {
       job,
-      event
+      event,
     };
+  });
+}
+
+export async function reclaimJobsForNode(nodeId) {
+  return db.transaction(async (tx) => {
+    const now = new Date();
+
+    const jobsToReclaim = await tx
+      .update(jobs)
+      .set({
+        status: "queued",
+        lockedBy: null,
+        leaseExpiresAt: null,
+        runAfter: now,
+        updatedAt: now,
+      })
+      .where(and(eq(jobs.status, "running"), eq(jobs.lockedBy, nodeId)))
+      .returning();
+
+    /*
+     * Record every reclamation in the event history.
+     */
+    for (const job of jobsToReclaim) {
+      await tx.insert(jobEvents).values({
+        jobId: job.id,
+        eventType: "reclaimed",
+        nodeId,
+        message: `Job reclaimed after node ${nodeId} became unreachable`,
+      });
+    }
+
+    return jobsToReclaim;
   });
 }

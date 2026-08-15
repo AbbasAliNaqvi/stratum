@@ -11,8 +11,12 @@ export async function registerNode(input) {
     .limit(1);
 
   if (existing.length > 0) {
-    const error = new Error("Node already registered");
+    const error = new Error(
+      "Node already registered"
+    );
+
     error.code = "NODE_ALREADY_EXISTS";
+
     throw error;
   }
 
@@ -38,15 +42,19 @@ export async function heartbeatNode(nodeId) {
     .update(nodes)
     .set({
       status: "registered",
-      lastHeartbeatAt: now ,
+      lastHeartbeatAt: now,
       updatedAt: now
     })
     .where(eq(nodes.nodeId, nodeId))
     .returning();
 
   if (!node) {
-    const error = new Error(`Node '${nodeId}' not found`);
+    const error = new Error(
+      `Node '${nodeId}' not found`
+    );
+
     error.code = "NODE_NOT_FOUND";
+
     throw error;
   }
 
