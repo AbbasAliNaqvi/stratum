@@ -240,30 +240,82 @@ export async function reclaimJobsForNode(nodeId) {
   return db.transaction(async (tx) => {
     const now = new Date();
 
-    const jobsToReclaim = await tx
-      .update(jobs)
-      .set({
-        status: "queued",
-        lockedBy: null,
-        leaseExpiresAt: null,
-        runAfter: now,
-        updatedAt: now,
-      })
-      .where(and(eq(jobs.status, "running"), eq(jobs.lockedBy, nodeId)))
-      .returning();
+    const runningJobs = await tx
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.status, "running"),
+          eq(jobs.lockedBy, nodeId)
+        )
+      );
 
-    /*
-     * Record every reclamation in the event history.
-     */
-    for (const job of jobsToReclaim) {
-      await tx.insert(jobEvents).values({
-        jobId: job.id,
-        eventType: "reclaimed",
-        nodeId,
-        message: `Job reclaimed after node ${nodeId} became unreachable`,
-      });
+    const reclaimedJobs = [];
+
+    for (const currentJob of runningJobs) {
+      const shouldFail =
+        currentJob.retryCount >= currentJob.maxRetries;
+
+      const nextRetryCount = currentJob.retryCount + 1;
+
+      const [job] = await tx
+        .update(jobs)
+        .set({
+          status: shouldFail ? "failed" : "queued",
+          retryCount: shouldFail
+            ? currentJob.retryCount
+            : nextRetryCount,
+
+          lockedBy: null,
+          leaseExpiresAt: null,
+
+          runAfter: shouldFail
+            ? currentJob.runAfter
+            : now,
+
+          finishedAt: shouldFail
+            ? now
+            : null,
+
+          error: shouldFail
+            ? `Job failed after ${currentJob.maxRetries} retries`
+            : null,
+
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(jobs.id, currentJob.id),
+            eq(jobs.status, "running"),
+            eq(jobs.lockedBy, nodeId)
+          )
+        )
+        .returning();
+
+      if (!job) {
+        continue;
+      }
+
+      const eventType = shouldFail
+        ? "failed"
+        : "reclaimed";
+
+      const message = shouldFail
+        ? `Job failed after ${currentJob.maxRetries} retries`
+        : `Job reclaimed after node ${nodeId} became unreachable`;
+
+      await tx
+        .insert(jobEvents)
+        .values({
+          jobId: job.id,
+          eventType,
+          nodeId,
+          message,
+        });
+
+      reclaimedJobs.push(job);
     }
 
-    return jobsToReclaim;
+    return reclaimedJobs;
   });
 }
