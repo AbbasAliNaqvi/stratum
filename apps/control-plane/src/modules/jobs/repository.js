@@ -1,6 +1,18 @@
-import { eq, desc, asc, and } from "drizzle-orm";
+import {
+  eq,
+  desc,
+  asc,
+  and,
+  lte,
+  sql
+} from "drizzle-orm";
+
 import { db } from "../../db/client.js";
-import { jobs, jobEvents } from "../../db/schema.js";
+import {
+  jobs,
+  jobEvents,
+  nodes
+} from "../../db/schema.js";
 
 export async function insertJob(data) {
   const [job] = await db
@@ -100,4 +112,95 @@ export async function getJobByIdempotencyKey(idempotencyKey) {
     .limit(1);
 
   return job ?? null;
+}
+
+export async function claimNextJob({
+  nodeId,
+  leaseDurationMs
+}) {
+  return db.transaction(async (tx) => {
+    const now = new Date();
+
+    const leaseExpiresAt = new Date(
+      now.getTime() + leaseDurationMs
+    );
+
+    const [node] = await tx
+      .select({
+        nodeId: nodes.nodeId
+      })
+      .from(nodes)
+      .where(
+        and(
+          eq(nodes.nodeId, nodeId),
+          eq(nodes.status, "registered")
+        )
+      )
+      .limit(1);
+
+    if (!node) {
+      const error = new Error(
+        `Node '${nodeId}' is not registered`
+      );
+
+      error.code = "NODE_NOT_REGISTERED";
+
+      throw error;
+    }
+
+    const [job] = await tx
+      .update(jobs)
+      .set({
+        status: "running",
+        lockedBy: nodeId,
+        leaseToken: sql`${jobs.leaseToken} + 1`,
+        leaseExpiresAt,
+        startedAt: now,
+        updatedAt: now
+      })
+      .where(
+        eq(
+          jobs.id,
+          tx
+            .select({
+              id: jobs.id
+            })
+            .from(jobs)
+            .where(
+              and(
+                eq(jobs.status, "queued"),
+                lte(jobs.runAfter, now)
+              )
+            )
+            .orderBy(
+              desc(jobs.priority),
+              asc(jobs.createdAt)
+            )
+            .limit(1)
+            .for("update", {
+              skipLocked: true
+            })
+        )
+      )
+      .returning();
+
+    if (!job) {
+      return null;
+    }
+
+    const [event] = await tx
+      .insert(jobEvents)
+      .values({
+        jobId: job.id,
+        eventType: "claimed",
+        nodeId,
+        message: `Job claimed by node ${nodeId}`
+      })
+      .returning();
+
+    return {
+      job,
+      event
+    };
+  });
 }

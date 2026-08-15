@@ -37,7 +37,14 @@ const EnvSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(5000)
+    .default(5000),
+
+  JOB_LEASE_DURATION_MS: z
+    .coerce
+    .number()
+    .int()
+    .positive()
+    .default(30000)
 });
 
 const result = EnvSchema.safeParse(process.env);

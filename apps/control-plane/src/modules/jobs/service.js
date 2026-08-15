@@ -1,9 +1,9 @@
 import {
   createJobWithEvent,
   getJobById,
-  getJobByIdempotencyKey,
   getJobEvents,
-  listJobs
+  listJobs,
+  claimNextJob as claimNextJobRepository
 } from "./repository.js";
 
 export async function createJob(input) {
@@ -54,4 +54,11 @@ export async function getJob(id) {
 
 export async function getJobs(filters) {
   return listJobs(filters);
+}
+
+export async function claimJob(input) {
+  return claimNextJobRepository({
+    nodeId: input.nodeId,
+    leaseDurationMs: input.leaseDurationMs
+  });
 }
