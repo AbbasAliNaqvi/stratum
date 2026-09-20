@@ -7,6 +7,7 @@ import {
   claimNextJob as claimNextJobRepository,
   completeJob as completeJobRepository,
   reclaimJobsForNode as reclaimJobsForNodeRepository,
+  requestJobCancellation as requestJobCancellationRepository
 } from "./repository.js";
 
 export async function createJob(input) {
@@ -80,4 +81,8 @@ export async function completeJob(input) {
 
 export async function reclaimJobsForNode(nodeId) {
   return reclaimJobsForNodeRepository(nodeId);
+}
+
+export async function requestJobCancellation(jobId) {
+  return requestJobCancellationRepository(jobId);
 }

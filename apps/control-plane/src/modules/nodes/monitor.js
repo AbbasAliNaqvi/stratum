@@ -9,8 +9,12 @@ import { db } from "../../db/client.js";
 import { nodes } from "../../db/schema.js";
 import { reclaimJobsForNode } from "../jobs/repository.js";
 
-
-export function startNodeLivenessMonitor(logger) {
+export function startNodeLivenessMonitor(
+  logger,
+  {
+    checkIntervalMs = config.HEARTBEAT_CHECK_INTERVAL_MS,
+  } = {}
+) {
   const interval = setInterval(async () => {
     try {
       const cutoff = new Date(
@@ -20,7 +24,7 @@ export function startNodeLivenessMonitor(logger) {
       const staleNodes = await db
         .update(nodes)
         .set({
-          status: "unreachable"
+          status: "unreachable",
         })
         .where(
           and(
@@ -29,7 +33,7 @@ export function startNodeLivenessMonitor(logger) {
           )
         )
         .returning({
-          nodeId: nodes.nodeId
+          nodeId: nodes.nodeId,
         });
 
       for (const node of staleNodes) {
@@ -54,7 +58,7 @@ export function startNodeLivenessMonitor(logger) {
         "Node liveness check failed"
       );
     }
-  }, config.HEARTBEAT_CHECK_INTERVAL_MS);
+  }, checkIntervalMs);
 
   interval.unref();
 

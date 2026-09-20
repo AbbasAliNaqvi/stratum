@@ -319,3 +319,166 @@ export async function reclaimJobsForNode(nodeId) {
     return reclaimedJobs;
   });
 }
+
+export async function requestJobCancellation(jobId) {
+  return db.transaction(async (tx) => {
+    const now = new Date();
+
+    const [currentJob] = await tx
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1)
+      .for("update");
+
+    if (!currentJob) {
+      return {
+        job: null,
+        event: null,
+        error: "JOB_NOT_FOUND",
+      };
+    }
+
+    /*
+     * Terminal states cannot be cancelled.
+     */
+    if (currentJob.status === "succeeded") {
+      return {
+        job: currentJob,
+        event: null,
+        error: "JOB_ALREADY_SUCCEEDED",
+      };
+    }
+
+    if (currentJob.status === "failed") {
+      return {
+        job: currentJob,
+        event: null,
+        error: "JOB_ALREADY_FAILED",
+      };
+    }
+
+    /*
+     * Cancellation is idempotent.
+     *
+     * If the job was already cancelled, do not create
+     * another cancellation event.
+     */
+    if (currentJob.status === "cancelled") {
+      return {
+        job: currentJob,
+        event: null,
+        error: null,
+      };
+    }
+
+    /*
+     * Queued jobs can be cancelled immediately because
+     * no worker owns them.
+     */
+    if (currentJob.status === "queued") {
+      const [job] = await tx
+        .update(jobs)
+        .set({
+          status: "cancelled",
+          cancelRequestedAt: now,
+          finishedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(jobs.id, jobId),
+            eq(jobs.status, "queued"),
+          ),
+        )
+        .returning();
+
+      if (!job) {
+        return {
+          job: null,
+          event: null,
+          error: "CANCELLATION_RACE",
+        };
+      }
+
+      const [event] = await tx
+        .insert(jobEvents)
+        .values({
+          jobId: job.id,
+          eventType: "cancelled",
+          message: "Queued job cancelled",
+        })
+        .returning();
+
+      return {
+        job,
+        event,
+        error: null,
+      };
+    }
+
+    /*
+     * Running jobs cannot be immediately cancelled because
+     * a worker currently owns their lease.
+     *
+     * Instead we record a cancellation request. The worker
+     * will observe this and stop execution.
+     */
+    if (currentJob.status === "running") {
+      const [job] = await tx
+        .update(jobs)
+        .set({
+          cancelRequestedAt:
+            currentJob.cancelRequestedAt ?? now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(jobs.id, jobId),
+            eq(jobs.status, "running"),
+          ),
+        )
+        .returning();
+
+      if (!job) {
+        return {
+          job: null,
+          event: null,
+          error: "CANCELLATION_RACE",
+        };
+      }
+
+      /*
+       * Only create an event for the first cancellation
+       * request. Repeated requests remain idempotent.
+       */
+      let event = null;
+
+      if (!currentJob.cancelRequestedAt) {
+        const [createdEvent] = await tx
+          .insert(jobEvents)
+          .values({
+            jobId: job.id,
+            eventType: "cancel_requested",
+            nodeId: job.lockedBy,
+            message: `Cancellation requested for job ${job.id}`,
+          })
+          .returning();
+
+        event = createdEvent;
+      }
+
+      return {
+        job,
+        event,
+        error: null,
+      };
+    }
+
+    return {
+      job: currentJob,
+      event: null,
+      error: "JOB_NOT_CANCELLABLE",
+    };
+  });
+}

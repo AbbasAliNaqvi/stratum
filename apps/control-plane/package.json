@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "test": "vitest run",
+    "test": "vitest run --no-file-parallelism",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
