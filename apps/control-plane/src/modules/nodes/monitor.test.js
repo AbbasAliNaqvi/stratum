@@ -1,6 +1,6 @@
 import {
-  beforeAll,
   afterAll,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -8,21 +8,36 @@ import {
   vi,
 } from "vitest";
 
-import { eq } from "drizzle-orm";
+import {
+  eq,
+  inArray,
+  like,
+} from "drizzle-orm";
 
-import { db, pool } from "../../db/client.js";
+import {
+  db,
+  pool,
+} from "../../db/client.js";
+
 import {
   jobs,
   jobEvents,
   nodes,
 } from "../../db/schema.js";
 
-import { claimNextJob } from "../jobs/repository.js";
-import { startNodeLivenessMonitor } from "./monitor.js";
+import {
+  claimNextJob,
+} from "../jobs/repository.js";
 
-const NODE_ID = `liveness-test-worker-${Date.now()}`;
+import {
+  startNodeLivenessMonitor,
+} from "./monitor.js";
 
-const JOB_TYPE = `STRATUM-LIVENESS-TEST-${Date.now()}`;
+const NODE_ID =
+  `liveness-test-worker-${Date.now()}`;
+
+const JOB_TYPE =
+  `STRATUM-LIVENESS-TEST-${Date.now()}`;
 
 async function createTestNode() {
   await db
@@ -34,14 +49,27 @@ async function createTestNode() {
       memoryMb: 4096,
       platform: "test",
       status: "registered",
-      lastHeartbeatAt: new Date(Date.now() - 60_000),
+      lastHeartbeatAt:
+        new Date(Date.now() - 60_000),
     })
-    .onConflictDoNothing({
+    .onConflictDoUpdate({
       target: nodes.nodeId,
+      set: {
+        hostname: "liveness-test-host",
+        cpuCores: 4,
+        memoryMb: 4096,
+        platform: "test",
+        status: "registered",
+        lastHeartbeatAt:
+          new Date(Date.now() - 60_000),
+        updatedAt: new Date(),
+      },
     });
 }
 
-async function createTestJob(overrides = {}) {
+async function createTestJob(
+  overrides = {}
+) {
   const [job] = await db
     .insert(jobs)
     .values({
@@ -49,7 +77,7 @@ async function createTestJob(overrides = {}) {
       payload: {
         test: true,
       },
-      priority: 100,
+      priority: 100_000,
       maxRetries: 3,
       retryCount: 0,
       ...overrides,
@@ -60,34 +88,35 @@ async function createTestJob(overrides = {}) {
 }
 
 async function cleanupJobs() {
+  /*
+   * IMPORTANT:
+   * Only clean liveness-test jobs.
+   * Do NOT touch repository-test jobs.
+   */
   const testJobs = await db
     .select({
       id: jobs.id,
     })
     .from(jobs)
-    .where(eq(jobs.type, JOB_TYPE));
+    .where(
+      like(
+        jobs.type,
+        "STRATUM-LIVENESS-TEST-%"
+      )
+    );
 
-  for (const job of testJobs) {
-    await db
-      .delete(jobEvents)
-      .where(eq(jobEvents.jobId, job.id));
+  if (testJobs.length === 0) {
+    return;
   }
 
-  // Remove FK references to the test node.
-  await db
-    .update(jobs)
-    .set({
-      lockedBy: null,
-      leaseExpiresAt: null,
-    })
-    .where(eq(jobs.type, JOB_TYPE));
+  const jobIds = testJobs.map(
+    (job) => job.id
+  );
 
-  await db
-    .delete(jobs)
-    .where(eq(jobs.type, JOB_TYPE));
-}
-
-async function cleanupNode() {
+  /*
+   * First move jobs out of running state so
+   * jobs_running_lease_check remains valid.
+   */
   await db
     .update(jobs)
     .set({
@@ -95,26 +124,74 @@ async function cleanupNode() {
       lockedBy: null,
       leaseExpiresAt: null,
       finishedAt: null,
+      cancelRequestedAt: null,
       updatedAt: new Date(),
     })
-    .where(eq(jobs.lockedBy, NODE_ID));
+    .where(
+      inArray(
+        jobs.id,
+        jobIds
+      )
+    );
+
+  await db
+    .delete(jobEvents)
+    .where(
+      inArray(
+        jobEvents.jobId,
+        jobIds
+      )
+    );
+
+  await db
+    .delete(jobs)
+    .where(
+      inArray(
+        jobs.id,
+        jobIds
+      )
+    );
+}
+
+async function cleanupNodeJobs() {
+  /*
+   * Only release jobs owned by the liveness test node.
+   */
+  await db
+    .update(jobs)
+    .set({
+      status: "queued",
+      lockedBy: null,
+      leaseExpiresAt: null,
+      finishedAt: null,
+      cancelRequestedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      eq(
+        jobs.lockedBy,
+        NODE_ID
+      )
+    );
+}
+
+async function cleanupNode() {
+  await cleanupNodeJobs();
 
   await cleanupJobs();
 
   await db
     .delete(nodes)
-    .where(eq(nodes.nodeId, NODE_ID));
+    .where(
+      eq(
+        nodes.nodeId,
+        NODE_ID
+      )
+    );
 }
 
 async function resetTestNode() {
-  await db
-    .update(nodes)
-    .set({
-      status: "registered",
-      lastHeartbeatAt: new Date(Date.now() - 60_000),
-      updatedAt: new Date(),
-    })
-    .where(eq(nodes.nodeId, NODE_ID));
+  await createTestNode();
 }
 
 const logger = {
@@ -122,121 +199,207 @@ const logger = {
   error: vi.fn(),
 };
 
-describe("node liveness monitor", () => {
-  let stopMonitor;
+describe(
+  "node liveness monitor",
+  () => {
+    let stopMonitor;
 
-  beforeAll(async () => {
-    await cleanupJobs();
-    await cleanupNode();
-    await createTestNode();
-  });
-
-  beforeEach(async () => {
-    if (stopMonitor) {
-      stopMonitor();
-      stopMonitor = undefined;
-    }
-
-    await cleanupJobs();
-    await resetTestNode();
-
-    logger.warn.mockClear();
-    logger.error.mockClear();
-  });
-
-  afterAll(async () => {
-    if (stopMonitor) {
-      stopMonitor();
-      stopMonitor = undefined;
-    }
-
-    await cleanupJobs();
-    await cleanupNode();
-
-    await pool.end();
-  });
-
-  it("marks a stale registered node as unreachable", async () => {
-    stopMonitor = startNodeLivenessMonitor(logger, {
-      checkIntervalMs: 50,
+    beforeAll(async () => {
+      await cleanupNode();
+      await createTestNode();
     });
 
-    await vi.waitFor(
-      async () => {
-        const [node] = await db
-          .select()
-          .from(nodes)
-          .where(eq(nodes.nodeId, NODE_ID));
+    beforeEach(async () => {
+      if (stopMonitor) {
+        stopMonitor();
+        stopMonitor = undefined;
+      }
 
-        expect(node.status).toBe("unreachable");
-      },
-      {
-        timeout: 1_000,
-        interval: 25,
+      await cleanupNodeJobs();
+      await cleanupJobs();
+      await resetTestNode();
+
+      logger.warn.mockClear();
+      logger.error.mockClear();
+    });
+
+    afterAll(async () => {
+      if (stopMonitor) {
+        stopMonitor();
+        stopMonitor = undefined;
+      }
+
+      await cleanupNode();
+
+      await pool.end();
+    });
+
+    it(
+      "marks a stale registered node as unreachable",
+      async () => {
+        stopMonitor =
+          startNodeLivenessMonitor(
+            logger,
+            {
+              checkIntervalMs: 50,
+            }
+          );
+
+        await vi.waitFor(
+          async () => {
+            const [node] =
+              await db
+                .select()
+                .from(nodes)
+                .where(
+                  eq(
+                    nodes.nodeId,
+                    NODE_ID
+                  )
+                );
+
+            expect(
+              node
+            ).toBeDefined();
+
+            expect(
+              node.status
+            ).toBe(
+              "unreachable"
+            );
+          },
+          {
+            timeout: 1_000,
+            interval: 25,
+          }
+        );
+
+        expect(
+          logger.warn
+        ).toHaveBeenCalledWith(
+          `Node ${NODE_ID} marked unreachable`
+        );
+
+        stopMonitor();
+        stopMonitor = undefined;
       }
     );
 
-    expect(logger.warn).toHaveBeenCalledWith(
-      `Node ${NODE_ID} marked unreachable`
-    );
-
-    stopMonitor();
-    stopMonitor = undefined;
-  });
-
-  it("reclaims jobs owned by a stale node", async () => {
-    const job = await createTestJob({
-      retryCount: 0,
-    });
-
-    const claimed = await claimNextJob({
-      nodeId: NODE_ID,
-      leaseDurationMs: 60_000,
-    });
-
-    expect(claimed).not.toBeNull();
-    expect(claimed.job.id).toBe(job.id);
-    expect(claimed.job.status).toBe("running");
-    expect(claimed.job.lockedBy).toBe(NODE_ID);
-
-    stopMonitor = startNodeLivenessMonitor(logger, {
-      checkIntervalMs: 50,
-    });
-
-    await vi.waitFor(
+    it(
+      "reclaims jobs owned by a stale node",
       async () => {
-        const [node] = await db
-          .select()
-          .from(nodes)
-          .where(eq(nodes.nodeId, NODE_ID));
+        const job =
+          await createTestJob({
+            retryCount: 0,
+          });
 
-        expect(node.status).toBe("unreachable");
+        const claimed =
+          await claimNextJob({
+            nodeId: NODE_ID,
+            leaseDurationMs: 60_000,
+          });
 
-        const [updatedJob] = await db
-          .select()
-          .from(jobs)
-          .where(eq(jobs.id, job.id));
+        expect(
+          claimed
+        ).not.toBeNull();
 
-        expect(updatedJob.status).toBe("queued");
-        expect(updatedJob.retryCount).toBe(1);
-        expect(updatedJob.lockedBy).toBeNull();
-        expect(updatedJob.leaseExpiresAt).toBeNull();
-      },
-      {
-        timeout: 1_000,
-        interval: 25,
+        expect(
+          claimed.job.id
+        ).toBe(job.id);
+
+        expect(
+          claimed.job.status
+        ).toBe("running");
+
+        expect(
+          claimed.job.lockedBy
+        ).toBe(NODE_ID);
+
+        stopMonitor =
+          startNodeLivenessMonitor(
+            logger,
+            {
+              checkIntervalMs: 50,
+            }
+          );
+
+        await vi.waitFor(
+          async () => {
+            const [node] =
+              await db
+                .select()
+                .from(nodes)
+                .where(
+                  eq(
+                    nodes.nodeId,
+                    NODE_ID
+                  )
+                );
+
+            expect(
+              node
+            ).toBeDefined();
+
+            expect(
+              node.status
+            ).toBe(
+              "unreachable"
+            );
+
+            const [updatedJob] =
+              await db
+                .select()
+                .from(jobs)
+                .where(
+                  eq(
+                    jobs.id,
+                    job.id
+                  )
+                );
+
+            expect(
+              updatedJob
+            ).toBeDefined();
+
+            expect(
+              updatedJob.status
+            ).toBe(
+              "queued"
+            );
+
+            expect(
+              updatedJob.retryCount
+            ).toBe(1);
+
+            expect(
+              updatedJob.lockedBy
+            ).toBeNull();
+
+            expect(
+              updatedJob.leaseExpiresAt
+            ).toBeNull();
+          },
+          {
+            timeout: 1_000,
+            interval: 25,
+          }
+        );
+
+        expect(
+          logger.warn
+        ).toHaveBeenCalledWith(
+          `Node ${NODE_ID} marked unreachable`
+        );
+
+        expect(
+          logger.warn
+        ).toHaveBeenCalledWith(
+          `Job ${job.id} reclaimed from node ${NODE_ID}`
+        );
+
+        stopMonitor();
+        stopMonitor = undefined;
       }
     );
-
-    expect(logger.warn).toHaveBeenCalledWith(
-      `Node ${NODE_ID} marked unreachable`
-    );
-
-    expect(logger.warn).toHaveBeenCalledWith(
-      `Job ${job.id} reclaimed from node ${NODE_ID}`
-    );
-
-    stopMonitor();
-    stopMonitor = undefined;
-  });
-});
+  }
+);

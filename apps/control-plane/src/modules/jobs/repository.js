@@ -1,4 +1,14 @@
-import { eq, desc, asc, and, lte, sql, or } from "drizzle-orm";
+import {
+  eq,
+  desc,
+  asc,
+  and,
+  lte,
+  sql,
+  or,
+  isNull,
+  isNotNull,
+} from "drizzle-orm";
 
 import { db } from "../../db/client.js";
 import { jobs, jobEvents, nodes } from "../../db/schema.js";
@@ -211,6 +221,7 @@ export async function completeJob({
           eq(jobs.leaseToken, leaseToken),
           eq(jobs.status, "running"),
           sql`${jobs.leaseExpiresAt} > ${now}`,
+          isNull(jobs.cancelRequestedAt),
         ),
       )
       .returning();
@@ -243,18 +254,12 @@ export async function reclaimJobsForNode(nodeId) {
     const runningJobs = await tx
       .select()
       .from(jobs)
-      .where(
-        and(
-          eq(jobs.status, "running"),
-          eq(jobs.lockedBy, nodeId)
-        )
-      );
+      .where(and(eq(jobs.status, "running"), eq(jobs.lockedBy, nodeId)));
 
     const reclaimedJobs = [];
 
     for (const currentJob of runningJobs) {
-      const shouldFail =
-        currentJob.retryCount >= currentJob.maxRetries;
+      const shouldFail = currentJob.retryCount >= currentJob.maxRetries;
 
       const nextRetryCount = currentJob.retryCount + 1;
 
@@ -262,20 +267,14 @@ export async function reclaimJobsForNode(nodeId) {
         .update(jobs)
         .set({
           status: shouldFail ? "failed" : "queued",
-          retryCount: shouldFail
-            ? currentJob.retryCount
-            : nextRetryCount,
+          retryCount: shouldFail ? currentJob.retryCount : nextRetryCount,
 
           lockedBy: null,
           leaseExpiresAt: null,
 
-          runAfter: shouldFail
-            ? currentJob.runAfter
-            : now,
+          runAfter: shouldFail ? currentJob.runAfter : now,
 
-          finishedAt: shouldFail
-            ? now
-            : null,
+          finishedAt: shouldFail ? now : null,
 
           error: shouldFail
             ? `Job failed after ${currentJob.maxRetries} retries`
@@ -287,8 +286,8 @@ export async function reclaimJobsForNode(nodeId) {
           and(
             eq(jobs.id, currentJob.id),
             eq(jobs.status, "running"),
-            eq(jobs.lockedBy, nodeId)
-          )
+            eq(jobs.lockedBy, nodeId),
+          ),
         )
         .returning();
 
@@ -296,22 +295,18 @@ export async function reclaimJobsForNode(nodeId) {
         continue;
       }
 
-      const eventType = shouldFail
-        ? "failed"
-        : "reclaimed";
+      const eventType = shouldFail ? "failed" : "reclaimed";
 
       const message = shouldFail
         ? `Job failed after ${currentJob.maxRetries} retries`
         : `Job reclaimed after node ${nodeId} became unreachable`;
 
-      await tx
-        .insert(jobEvents)
-        .values({
-          jobId: job.id,
-          eventType,
-          nodeId,
-          message,
-        });
+      await tx.insert(jobEvents).values({
+        jobId: job.id,
+        eventType,
+        nodeId,
+        message,
+      });
 
       reclaimedJobs.push(job);
     }
@@ -385,12 +380,7 @@ export async function requestJobCancellation(jobId) {
           finishedAt: now,
           updatedAt: now,
         })
-        .where(
-          and(
-            eq(jobs.id, jobId),
-            eq(jobs.status, "queued"),
-          ),
-        )
+        .where(and(eq(jobs.id, jobId), eq(jobs.status, "queued")))
         .returning();
 
       if (!job) {
@@ -428,16 +418,10 @@ export async function requestJobCancellation(jobId) {
       const [job] = await tx
         .update(jobs)
         .set({
-          cancelRequestedAt:
-            currentJob.cancelRequestedAt ?? now,
+          cancelRequestedAt: currentJob.cancelRequestedAt ?? now,
           updatedAt: now,
         })
-        .where(
-          and(
-            eq(jobs.id, jobId),
-            eq(jobs.status, "running"),
-          ),
-        )
+        .where(and(eq(jobs.id, jobId), eq(jobs.status, "running")))
         .returning();
 
       if (!job) {
@@ -480,5 +464,128 @@ export async function requestJobCancellation(jobId) {
       event: null,
       error: "JOB_NOT_CANCELLABLE",
     };
+  });
+}
+
+export async function acknowledgeJobCancellation({
+  jobId,
+  nodeId,
+  leaseToken,
+}) {
+  return db.transaction(async (tx) => {
+    const now = new Date();
+
+    const [currentJob] = await tx
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1)
+      .for("update");
+
+    if (!currentJob) {
+      return {
+        job: null,
+        event: null,
+        error: "JOB_NOT_FOUND",
+      };
+    }
+
+    if (currentJob.status === "cancelled") {
+      return {
+        job: currentJob,
+        event: null,
+        error: null,
+      };
+    }
+
+    if (
+      currentJob.status !== "running" ||
+      !currentJob.cancelRequestedAt
+    ) {
+      return {
+        job: currentJob,
+        event: null,
+        error: "CANCELLATION_NOT_REQUESTED",
+      };
+    }
+
+    const [job] = await tx
+      .update(jobs)
+      .set({
+        status: "cancelled",
+        finishedAt: now,
+        updatedAt: now,
+        lockedBy: null,
+        leaseExpiresAt: null,
+      })
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.lockedBy, nodeId),
+          eq(jobs.leaseToken, leaseToken),
+          eq(jobs.status, "running"),
+          isNotNull(jobs.cancelRequestedAt),
+          sql`${jobs.leaseExpiresAt} > ${now}`,
+        ),
+      )
+      .returning();
+
+    if (!job) {
+      return {
+        job: null,
+        event: null,
+        error: "CANCELLATION_RACE",
+      };
+    }
+
+    const [event] = await tx
+      .insert(jobEvents)
+      .values({
+        jobId: job.id,
+        eventType: "cancelled",
+        nodeId,
+        message: `Job cancelled by node ${nodeId}`,
+      })
+      .returning();
+
+    return {
+      job,
+      event,
+      error: null,
+    };
+  });
+}
+
+export async function renewJobLease({
+  jobId,
+  nodeId,
+  leaseToken,
+  leaseDurationMs,
+}) {
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const leaseExpiresAt = new Date(
+      now.getTime() + leaseDurationMs
+    );
+
+    const [job] = await tx
+      .update(jobs)
+      .set({
+        leaseExpiresAt,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.lockedBy, nodeId),
+          eq(jobs.leaseToken, leaseToken),
+          eq(jobs.status, "running"),
+          isNull(jobs.cancelRequestedAt),
+          sql`${jobs.leaseExpiresAt} > ${now}`,
+        ),
+      )
+      .returning();
+
+    return job ?? null;
   });
 }

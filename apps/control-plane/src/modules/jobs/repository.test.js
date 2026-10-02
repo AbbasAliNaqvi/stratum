@@ -1,8 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 
 import { db, pool } from "../../db/client.js";
+
 import { jobs, nodes, jobEvents } from "../../db/schema.js";
 
 import {
@@ -10,6 +11,8 @@ import {
   completeJob,
   reclaimJobsForNode,
   requestJobCancellation,
+  renewJobLease,
+  getJobEvents,
 } from "./repository.js";
 
 const NODE_ID = `test-worker-${Date.now()}`;
@@ -32,7 +35,9 @@ async function createTestNode() {
     });
 }
 
-async function createTestJob(overrides = {}) {
+async function createTestJob(
+  overrides = {}
+) {
   const [job] = await db
     .insert(jobs)
     .values({
@@ -40,9 +45,22 @@ async function createTestJob(overrides = {}) {
       payload: {
         test: true,
       },
-      priority: 100,
+
+      priority: 100_000,
+
       maxRetries: 3,
       retryCount: 0,
+
+      /*
+       * Explicitly make the job immediately claimable.
+       *
+       * This avoids relying on PostgreSQL's clock/defaultNow()
+       * being perfectly aligned with Node's new Date().
+       */
+      runAfter: new Date(
+        Date.now() - 5_000
+      ),
+
       ...overrides,
     })
     .returning();
@@ -56,7 +74,7 @@ async function cleanupJobs() {
       id: jobs.id,
     })
     .from(jobs)
-    .where(eq(jobs.type, JOB_TYPE));
+    .where(like(jobs.type, "STRATUM-REPOSITORY-TEST-%"));
 
   if (testJobs.length === 0) {
     return;
@@ -64,14 +82,6 @@ async function cleanupJobs() {
 
   const jobIds = testJobs.map((job) => job.id);
 
-  // job_events has a foreign key to jobs,
-  // so events must be deleted first.
-  await db.delete(jobEvents).where(inArray(jobEvents.jobId, jobIds));
-
-  await db.delete(jobs).where(inArray(jobs.id, jobIds));
-}
-
-async function cleanupNode() {
   await db
     .update(jobs)
     .set({
@@ -79,6 +89,31 @@ async function cleanupNode() {
       lockedBy: null,
       leaseExpiresAt: null,
       finishedAt: null,
+      cancelRequestedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(inArray(jobs.id, jobIds));
+
+  await db.delete(jobEvents).where(inArray(jobEvents.jobId, jobIds));
+
+  await db.delete(jobs).where(inArray(jobs.id, jobIds));
+}
+
+async function cleanupNode() {
+  /*
+   * A test can accidentally claim another job because
+   * claimNextJob() operates on the global queue.
+   *
+   * Release anything owned by this test node first.
+   */
+  await db
+    .update(jobs)
+    .set({
+      status: "queued",
+      lockedBy: null,
+      leaseExpiresAt: null,
+      finishedAt: null,
+      cancelRequestedAt: null,
       updatedAt: new Date(),
     })
     .where(eq(jobs.lockedBy, NODE_ID));
@@ -90,14 +125,14 @@ async function cleanupNode() {
 
 describe("job lease fencing", () => {
   beforeEach(async () => {
-    await cleanupJobs();
     await cleanupNode();
+    await cleanupJobs();
     await createTestNode();
   });
 
   afterAll(async () => {
-    await cleanupJobs();
     await cleanupNode();
+    await cleanupJobs();
     await pool.end();
   });
 
@@ -110,8 +145,11 @@ describe("job lease fencing", () => {
     });
 
     expect(claimed).not.toBeNull();
+
     expect(claimed.job.id).toBe(job.id);
+
     expect(claimed.job.status).toBe("running");
+
     expect(claimed.job.leaseToken).toBe(1);
 
     const completed = await completeJob({
@@ -124,7 +162,9 @@ describe("job lease fencing", () => {
     });
 
     expect(completed).not.toBeNull();
+
     expect(completed.job.status).toBe("succeeded");
+
     expect(completed.job.result).toEqual({
       message: "success",
     });
@@ -139,6 +179,7 @@ describe("job lease fencing", () => {
     });
 
     expect(claimed).not.toBeNull();
+
     expect(claimed.job.id).toBe(job.id);
 
     const completed = await completeJob({
@@ -162,7 +203,9 @@ describe("job lease fencing", () => {
     });
 
     expect(firstClaim).not.toBeNull();
+
     expect(firstClaim.job.id).toBe(job.id);
+
     expect(firstClaim.job.leaseToken).toBe(1);
 
     await db
@@ -178,7 +221,9 @@ describe("job lease fencing", () => {
     });
 
     expect(secondClaim).not.toBeNull();
+
     expect(secondClaim.job.id).toBe(firstClaim.job.id);
+
     expect(secondClaim.job.leaseToken).toBe(2);
 
     const staleCompletion = await completeJob({
@@ -202,7 +247,9 @@ describe("job lease fencing", () => {
     });
 
     expect(validCompletion).not.toBeNull();
+
     expect(validCompletion.job.status).toBe("succeeded");
+
     expect(validCompletion.job.result).toEqual({
       message: "CURRENT WORKER WINS",
     });
@@ -220,15 +267,21 @@ describe("job lease fencing", () => {
     });
 
     expect(claimed).not.toBeNull();
+
     expect(claimed.job.id).toBe(job.id);
 
     const reclaimed = await reclaimJobsForNode(NODE_ID);
 
     expect(reclaimed).toHaveLength(1);
+
     expect(reclaimed[0].id).toBe(claimed.job.id);
+
     expect(reclaimed[0].status).toBe("queued");
+
     expect(reclaimed[0].retryCount).toBe(1);
+
     expect(reclaimed[0].lockedBy).toBeNull();
+
     expect(reclaimed[0].leaseExpiresAt).toBeNull();
   });
 
@@ -244,15 +297,21 @@ describe("job lease fencing", () => {
     });
 
     expect(claimed).not.toBeNull();
+
     expect(claimed.job.id).toBe(job.id);
 
     const reclaimed = await reclaimJobsForNode(NODE_ID);
 
     expect(reclaimed).toHaveLength(1);
+
     expect(reclaimed[0].id).toBe(claimed.job.id);
+
     expect(reclaimed[0].status).toBe("failed");
+
     expect(reclaimed[0].retryCount).toBe(3);
+
     expect(reclaimed[0].finishedAt).not.toBeNull();
+
     expect(reclaimed[0].error).toContain("3 retries");
   });
 
@@ -262,15 +321,23 @@ describe("job lease fencing", () => {
     const result = await requestJobCancellation(job.id);
 
     expect(result.error).toBeNull();
+
     expect(result.job.status).toBe("cancelled");
+
     expect(result.job.cancelRequestedAt).not.toBeNull();
+
     expect(result.job.finishedAt).not.toBeNull();
+
     expect(result.job.lockedBy).toBeNull();
+
     expect(result.job.leaseExpiresAt).toBeNull();
 
     expect(result.event).not.toBeNull();
+
     expect(result.event.eventType).toBe("cancelled");
+
     expect(result.event.jobId).toBe(job.id);
+
     expect(result.event.message).toBe("Queued job cancelled");
   });
 
@@ -283,52 +350,65 @@ describe("job lease fencing", () => {
     });
 
     expect(claimed).not.toBeNull();
+
     expect(claimed.job.id).toBe(job.id);
+
     expect(claimed.job.status).toBe("running");
 
     const result = await requestJobCancellation(job.id);
 
     expect(result.error).toBeNull();
+
     expect(result.job.status).toBe("running");
+
     expect(result.job.cancelRequestedAt).not.toBeNull();
+
     expect(result.job.lockedBy).toBe(NODE_ID);
+
     expect(result.job.leaseExpiresAt).not.toBeNull();
 
     expect(result.event).not.toBeNull();
+
     expect(result.event.eventType).toBe("cancel_requested");
+
     expect(result.event.jobId).toBe(job.id);
+
     expect(result.event.nodeId).toBe(NODE_ID);
   });
-it("rejects cancellation of a succeeded job", async () => {
-  const job = await createTestJob();
 
-  const claimed = await claimNextJob({
-    nodeId: NODE_ID,
-    leaseDurationMs: 60_000,
+  it("rejects cancellation of a succeeded job", async () => {
+    const job = await createTestJob();
+
+    const claimed = await claimNextJob({
+      nodeId: NODE_ID,
+      leaseDurationMs: 60_000,
+    });
+
+    expect(claimed).not.toBeNull();
+
+    expect(claimed.job.id).toBe(job.id);
+
+    const completed = await completeJob({
+      jobId: claimed.job.id,
+      nodeId: NODE_ID,
+      leaseToken: claimed.job.leaseToken,
+      result: {
+        message: "completed before cancellation",
+      },
+    });
+
+    expect(completed).not.toBeNull();
+
+    expect(completed.job.status).toBe("succeeded");
+
+    const result = await requestJobCancellation(job.id);
+
+    expect(result.error).toBe("JOB_ALREADY_SUCCEEDED");
+
+    expect(result.job.status).toBe("succeeded");
+
+    expect(result.event).toBeNull();
   });
-
-  expect(claimed).not.toBeNull();
-
-  const completed = await completeJob({
-    jobId: claimed.job.id,
-    nodeId: NODE_ID,
-    leaseToken: claimed.job.leaseToken,
-    result: {
-      message: "completed before cancellation",
-    },
-  });
-
-
-  expect(completed).not.toBeNull();
-  expect(completed.job.status).toBe("succeeded");
-
-  const result = await requestJobCancellation(job.id);
-
-  expect(result.error).toBe("JOB_ALREADY_SUCCEEDED");
-  expect(result.job.status).toBe("succeeded");
-  expect(result.event).toBeNull();
-});
-
 
   it("rejects cancellation of a failed job", async () => {
     const job = await createTestJob({
@@ -343,15 +423,22 @@ it("rejects cancellation of a succeeded job", async () => {
 
     expect(claimed).not.toBeNull();
 
+    expect(claimed.job.id).toBe(job.id);
+
     const reclaimed = await reclaimJobsForNode(NODE_ID);
 
     expect(reclaimed).toHaveLength(1);
+
+    expect(reclaimed[0].id).toBe(job.id);
+
     expect(reclaimed[0].status).toBe("failed");
 
     const result = await requestJobCancellation(job.id);
 
     expect(result.error).toBe("JOB_ALREADY_FAILED");
+
     expect(result.job.status).toBe("failed");
+
     expect(result.event).toBeNull();
   });
 
@@ -361,7 +448,9 @@ it("rejects cancellation of a succeeded job", async () => {
     const firstCancellation = await requestJobCancellation(job.id);
 
     expect(firstCancellation.error).toBeNull();
+
     expect(firstCancellation.job.status).toBe("cancelled");
+
     expect(firstCancellation.event).not.toBeNull();
 
     const eventsBeforeSecondCancellation = await db
@@ -372,7 +461,9 @@ it("rejects cancellation of a succeeded job", async () => {
     const secondCancellation = await requestJobCancellation(job.id);
 
     expect(secondCancellation.error).toBeNull();
+
     expect(secondCancellation.job.status).toBe("cancelled");
+
     expect(secondCancellation.event).toBeNull();
 
     const eventsAfterSecondCancellation = await db
@@ -391,7 +482,159 @@ it("rejects cancellation of a succeeded job", async () => {
     );
 
     expect(result.error).toBe("JOB_NOT_FOUND");
+
     expect(result.job).toBeNull();
+
     expect(result.event).toBeNull();
+  });
+
+  /*
+   * ── Lease Renewal Tests ──────────────────────────────────
+   */
+
+  it("renews a valid lease and extends leaseExpiresAt", async () => {
+    const job = await createTestJob();
+
+    const claimed = await claimNextJob({
+      nodeId: NODE_ID,
+      leaseDurationMs: 30_000,
+    });
+
+    expect(claimed).not.toBeNull();
+
+    expect(claimed.job.id).toBe(job.id);
+
+    const originalLeaseExpiresAt = new Date(
+      claimed.job.leaseExpiresAt,
+    ).getTime();
+
+    const renewed = await renewJobLease({
+      jobId: claimed.job.id,
+      nodeId: NODE_ID,
+      leaseToken: claimed.job.leaseToken,
+      leaseDurationMs: 30_000,
+    });
+
+    expect(renewed).not.toBeNull();
+
+    expect(renewed.leaseToken).toBe(claimed.job.leaseToken);
+
+    const newLeaseExpiresAt = new Date(
+      renewed.leaseExpiresAt,
+    ).getTime();
+
+    expect(newLeaseExpiresAt).toBeGreaterThan(originalLeaseExpiresAt);
+  });
+
+  it("rejects renewal with an invalid lease token", async () => {
+    const job = await createTestJob();
+
+    const claimed = await claimNextJob({
+      nodeId: NODE_ID,
+      leaseDurationMs: 60_000,
+    });
+
+    expect(claimed).not.toBeNull();
+
+    expect(claimed.job.id).toBe(job.id);
+
+    const renewed = await renewJobLease({
+      jobId: claimed.job.id,
+      nodeId: NODE_ID,
+      leaseToken: 999,
+      leaseDurationMs: 30_000,
+    });
+
+    expect(renewed).toBeNull();
+  });
+
+  it("rejects renewal when cancellation is requested", async () => {
+    const job = await createTestJob();
+
+    const claimed = await claimNextJob({
+      nodeId: NODE_ID,
+      leaseDurationMs: 60_000,
+    });
+
+    expect(claimed).not.toBeNull();
+
+    expect(claimed.job.id).toBe(job.id);
+
+    await requestJobCancellation(job.id);
+
+    const renewed = await renewJobLease({
+      jobId: claimed.job.id,
+      nodeId: NODE_ID,
+      leaseToken: claimed.job.leaseToken,
+      leaseDurationMs: 30_000,
+    });
+
+    expect(renewed).toBeNull();
+  });
+
+  it("rejects renewal when the lease has expired", async () => {
+    const job = await createTestJob();
+
+    const claimed = await claimNextJob({
+      nodeId: NODE_ID,
+      leaseDurationMs: 60_000,
+    });
+
+    expect(claimed).not.toBeNull();
+
+    expect(claimed.job.id).toBe(job.id);
+
+    /*
+     * Force the lease into the past.
+     */
+    await db
+      .update(jobs)
+      .set({
+        leaseExpiresAt: new Date(Date.now() - 5_000),
+      })
+      .where(eq(jobs.id, claimed.job.id));
+
+    const renewed = await renewJobLease({
+      jobId: claimed.job.id,
+      nodeId: NODE_ID,
+      leaseToken: claimed.job.leaseToken,
+      leaseDurationMs: 30_000,
+    });
+
+    expect(renewed).toBeNull();
+  });
+
+  it("does not create an event on successful renewal", async () => {
+    const job = await createTestJob();
+
+    const claimed = await claimNextJob({
+      nodeId: NODE_ID,
+      leaseDurationMs: 60_000,
+    });
+
+    expect(claimed).not.toBeNull();
+
+    expect(claimed.job.id).toBe(job.id);
+
+    const eventsBeforeRenewal = await getJobEvents(claimed.job.id);
+
+    expect(eventsBeforeRenewal).toHaveLength(1);
+
+    expect(eventsBeforeRenewal[0].eventType).toBe("claimed");
+
+    const renewed = await renewJobLease({
+      jobId: claimed.job.id,
+      nodeId: NODE_ID,
+      leaseToken: claimed.job.leaseToken,
+      leaseDurationMs: 30_000,
+    });
+
+    expect(renewed).not.toBeNull();
+
+    const eventsAfterRenewal = await getJobEvents(claimed.job.id);
+
+    expect(eventsAfterRenewal).toHaveLength(1);
+
+    expect(eventsAfterRenewal[0].eventType).toBe("claimed");
   });
 });

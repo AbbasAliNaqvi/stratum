@@ -4,7 +4,9 @@ import {
   getJobs,
   claimJob,
   completeJob,
-  requestJobCancellation
+  requestJobCancellation,
+  acknowledgeJobCancellation,
+  renewJobLease,
 } from "./service.js";
 
 import { config } from "../../config.js";
@@ -154,5 +156,82 @@ export async function jobRoutes(app) {
     }
 
     return reply.send(job);
+  });
+
+  app.post("/jobs/:id/cancel/acknowledge", async (request, reply) => {
+    try {
+      const { nodeId, leaseToken } = request.body ?? {};
+
+      if (!nodeId || leaseToken === undefined) {
+        return reply.code(400).send({
+          error: "nodeId and leaseToken are required",
+        });
+      }
+
+      const result = await acknowledgeJobCancellation({
+        jobId: request.params.id,
+        nodeId,
+        leaseToken,
+      });
+
+      if (result.error === "JOB_NOT_FOUND") {
+        return reply.code(404).send({
+          error: "Job not found",
+        });
+      }
+
+      if (
+        result.error === "CANCELLATION_NOT_REQUESTED" ||
+        result.error === "CANCELLATION_RACE"
+      ) {
+        return reply.code(409).send({
+          error: result.error,
+        });
+      }
+
+      return reply.send({
+        job: result.job,
+        event: result.event,
+      });
+    } catch (error) {
+      request.log.error(error);
+
+      return reply.code(500).send({
+        error: "Failed to acknowledge job cancellation",
+      });
+    }
+  });
+
+  app.post("/jobs/:id/renew", async (request, reply) => {
+    try {
+      const { nodeId, leaseToken } = request.body ?? {};
+
+      if (!nodeId || leaseToken === undefined) {
+        return reply.code(400).send({
+          error: "nodeId and leaseToken are required",
+        });
+      }
+
+      const job = await renewJobLease({
+        jobId: request.params.id,
+        nodeId,
+        leaseToken,
+        leaseDurationMs: config.JOB_LEASE_DURATION_MS,
+      });
+
+      if (!job) {
+        return reply.code(409).send({
+          error: "Job lease renewal rejected",
+        });
+      }
+
+      return reply.send({ job });
+    } catch (error) {
+      request.log.error(error);
+
+      return reply.code(500).send({
+        error: "Failed to renew job lease",
+      });
+    }
   });
 }
