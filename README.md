@@ -98,6 +98,27 @@ The worker is a standalone Node.js process that:
 | `echo` | Returns the input message |
 | `sleep` | Sleeps for a specified duration (0–300000ms) |
 
+### Observability
+
+Stratum implements a lightweight, dependency-free metrics layer based on the Prometheus exposition format, along with structured JSON logging for all major components.
+
+#### Metrics Endpoint
+
+The Control Plane exposes a metrics endpoint:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/metrics` | Prometheus-compatible metrics |
+
+#### Telemetry Tracked
+
+- **Job Lifecycle:** Created, claimed, completed, failed, cancelled, reclaimed.
+- **Job Performance:** Wait duration (queued time) and execution duration (running time).
+- **Node Lifecycle:** Registered, heartbeats received, stale nodes detected, recovered nodes.
+- **Lease Operations:** Renewals and renewal failures.
+- **HTTP/API:** Request counts and duration histograms by route and status.
+- **Worker Dumps:** Since the worker does not run an HTTP server, it periodically dumps its metrics into the logs in the Prometheus format.
+
 ## Setup
 
 ### Prerequisites
@@ -193,7 +214,7 @@ Add `--json` to any command for machine-readable JSON output.
 
 ## Roadmap
 
-- [ ] Observability (metrics, structured logging, tracing)
+- [x] Observability (metrics, structured logging, tracing)
 - [ ] AI-powered diagnostics engine
 - [ ] Policy/authorization engine for AI-proposed actions
 - [ ] Self-healing mechanisms

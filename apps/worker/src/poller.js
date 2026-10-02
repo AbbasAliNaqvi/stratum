@@ -1,5 +1,16 @@
 import { config } from "./config.js";
 import { executeJob } from "./executor.js";
+import {
+  workerJobsClaimedTotal,
+  workerJobsCompletedTotal,
+  workerJobsFailedTotal,
+  workerJobsCancelledTotal,
+  workerJobExecutionDuration,
+  workerLeaseRenewalsTotal,
+  workerLeaseRenewalFailuresTotal,
+  workerLeaseLostTotal,
+  workerPollErrorsTotal
+} from "./metrics.js";
 
 export function createJobPoller({
   client,
@@ -67,6 +78,8 @@ export function createJobPoller({
         leaseToken
       );
 
+      workerJobsCancelledTotal.inc({ job_type: job.type });
+
       logger.info("Job cancelled", {
         jobId: job.id,
         leaseToken,
@@ -115,6 +128,7 @@ export function createJobPoller({
 
         if (!renewedJob) {
           state.leaseLost = true;
+          workerLeaseLostTotal.inc({ job_type: job.type });
 
           logger.warn(
             "Job lease lost",
@@ -126,6 +140,8 @@ export function createJobPoller({
 
           return;
         }
+
+        workerLeaseRenewalsTotal.inc({ job_type: job.type });
 
         const expiresAt = new Date(
           renewedJob.leaseExpiresAt
@@ -146,7 +162,7 @@ export function createJobPoller({
           nextDelay
         );
 
-        logger.info(
+        logger.debug(
           "Job lease renewed",
           {
             jobId: job.id,
@@ -158,6 +174,7 @@ export function createJobPoller({
       } catch (error) {
         if (error.status === 409) {
           state.leaseLost = true;
+          workerLeaseLostTotal.inc({ job_type: job.type });
 
           logger.warn(
             "Job lease lost",
@@ -169,6 +186,8 @@ export function createJobPoller({
 
           return;
         }
+
+        workerLeaseRenewalFailuresTotal.inc({ job_type: job.type });
 
         logger.warn(
           "Job lease renewal failed",
@@ -196,16 +215,18 @@ export function createJobPoller({
     const initialRemaining =
       initialExpiry - Date.now();
 
+    const nextDelay = Math.max(
+      1_000,
+      Math.floor(
+        initialRemaining / 2
+      )
+    );
+
     renewalTimer = setTimeout(
       () => {
         void renew();
       },
-      Math.max(
-        1_000,
-        Math.floor(
-          initialRemaining / 2
-        )
-      )
+      nextDelay
     );
 
     return () => {
@@ -232,6 +253,8 @@ export function createJobPoller({
       const job = result.job;
       const leaseToken =
         job.leaseToken;
+        
+      workerJobsClaimedTotal.inc({ job_type: job.type });
 
       logger.info(
         "Job claimed",
@@ -270,6 +293,8 @@ export function createJobPoller({
           state
         );
 
+      const startTime = Date.now();
+
       try {
         if (state.cancelRequested) {
           controller.abort();
@@ -282,6 +307,8 @@ export function createJobPoller({
           });
 
         state.finished = true;
+        
+        workerJobExecutionDuration.observe({ job_type: job.type }, (Date.now() - startTime) / 1000);
 
         await cancellationWatcher;
 
@@ -312,6 +339,8 @@ export function createJobPoller({
           leaseToken,
           executionResult
         );
+        
+        workerJobsCompletedTotal.inc({ job_type: job.type });
 
         logger.info(
           "Job completed",
@@ -343,6 +372,8 @@ export function createJobPoller({
 
           return;
         }
+        
+        workerJobsFailedTotal.inc({ job_type: job.type });
 
         logger.error(
           "Job execution failed",
@@ -361,6 +392,7 @@ export function createJobPoller({
         executing = false;
       }
     } catch (error) {
+      workerPollErrorsTotal.inc();
       logger.error(
         "Job polling failed",
         {

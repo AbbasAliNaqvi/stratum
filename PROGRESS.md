@@ -242,3 +242,83 @@ Manually verified against a live local control plane:
 - AI diagnostics engine
 - Policy/authorization engine
 - Self-healing mechanisms
+
+---
+
+## Milestone: Observability Foundation — Metrics + Structured Telemetry
+
+**Date:** 2026-10-02
+
+### Problem
+
+The distributed control plane and worker components lacked visibility. Diagnosing issues required ad-hoc inspection, and there was no way to systematically monitor job lifecycles, execution latencies, node liveness, or system health without directly querying the PostgreSQL database, which doesn't scale for metrics.
+
+### What Was Built
+
+Implemented a lightweight, dependency-free telemetry layer exposing Prometheus-compatible metrics and structured JSON logging.
+
+#### `packages/metrics`
+- Created a standalone Prometheus-compatible metrics registry supporting Counters, Gauges, and Histograms.
+- Uses memory-bound data structures without relying on PostgreSQL or external daemons.
+- Implemented Prometheus text exposition format rendering.
+
+#### Control Plane Instrumentation
+- Added structured JSON logging via `pino` (already available via `@stratum/logger`).
+- Exposed `GET /metrics` HTTP endpoint.
+- Handled HTTP request metrics via Fastify middleware.
+- Instrumented Job Lifecycle (created, claimed, completed, failed, cancelled, reclaimed).
+- Instrumented Node Lifecycle (registered, heartbeat received, stale nodes, recovered nodes).
+- Added Execution and Queued Wait histograms for jobs.
+
+#### Worker Instrumentation
+- Migrated standard `console.log` statements to use a lightweight structural JSON logger.
+- Instrumented Job Poller lifecycle (claimed, completed, failed, executed duration).
+- Instrumented Node Heartbeats and Lease Renewals (renewals, failures, lease lost).
+- Implemented a background metrics dump mechanism, writing Prometheus metrics to standard output every 60 seconds (since the worker does not have an HTTP server).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `packages/metrics/src/index.js` | Built lightweight metrics registry |
+| `packages/metrics/src/index.test.js` | Added metrics registry unit tests |
+| `packages/metrics/package.json` | Created new workspace package |
+| `apps/control-plane/src/modules/metrics/index.js` | Configured CP metrics singletons |
+| `apps/control-plane/src/app.js` | Exposed `/metrics` and HTTP instrumentation |
+| `apps/control-plane/src/modules/jobs/service.js` | Added metrics and structural logging to job flows |
+| `apps/control-plane/src/modules/nodes/service.js` | Added metrics and structural logging to node flows |
+| `apps/control-plane/src/modules/nodes/monitor.js` | Added metrics for stale node reclamation |
+| `apps/worker/src/metrics.js` | Configured Worker metrics singletons |
+| `apps/worker/src/index.js` | Added heartbeat metrics and metrics dump |
+| `apps/worker/src/poller.js` | Added job execution and lease metrics |
+| `apps/worker/src/logger.js` | Restructured basic logger into structured JSON |
+| `README.md` | Documented observability layer |
+
+### Tests
+
+```
+packages/metrics (index.test.js)   4/4 ✅
+control-plane tests               18/18 ✅
+worker tests                       7/7 ✅
+cli tests                         25/25 ✅
+
+TOTAL                             54/54 ✅
+```
+
+### Integration Test Results
+
+Manually verified against a live local control plane and worker:
+1. Ran `node apps/cli/bin/stratum.js job submit -t echo -p '{"message": "final check"}'`.
+2. Verified that structured logs correctly tracked the job lifecycle (created → claimed → completed) in the CP and Worker.
+3. Queried `GET /metrics` and verified correctly formatted Prometheus metrics (Counters, Gauges, Histograms) dynamically updating in real-time.
+
+### Known Limitations
+
+- The worker metrics are only accessible via log parsing (dumped periodically), preventing immediate dynamic scraping by Prometheus.
+- The metrics registries are localized per-process. In a multi-replica setup, each replica exposes its own metrics.
+
+### Next Steps
+
+- AI diagnostics engine
+- Policy/authorization engine
+- Self-healing mechanisms

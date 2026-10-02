@@ -2,6 +2,8 @@ import { config } from "./config.js";
 import { createControlPlaneClient, ControlPlaneError } from "./client.js";
 import { logger } from "./logger.js";
 import { createJobPoller } from "./poller.js";
+import { workerHeartbeatTotal } from "./metrics.js";
+import { registry } from "@stratum/metrics";
 
 const client = createControlPlaneClient();
 const jobPoller = createJobPoller({
@@ -10,6 +12,7 @@ const jobPoller = createJobPoller({
 });
 
 let heartbeatTimer = null;
+let metricsTimer = null;
 let shuttingDown = false;
 
 async function registerOrRestoreNode() {
@@ -42,8 +45,9 @@ async function sendHeartbeat() {
 
   try {
     const node = await client.heartbeat();
+    workerHeartbeatTotal.inc();
 
-    logger.info("Heartbeat sent", {
+    logger.debug("Heartbeat sent", {
       nodeId: node.nodeId,
       status: node.status,
     });
@@ -68,6 +72,20 @@ function stopHeartbeat() {
   }
 }
 
+function startMetricsDump() {
+  // Dump metrics every 60 seconds as a simple mechanism since there is no HTTP server
+  metricsTimer = setInterval(() => {
+    logger.info({ event: "worker_metrics_dump" }, `\n${registry.metrics()}`);
+  }, 60000);
+}
+
+function stopMetricsDump() {
+  if (metricsTimer) {
+    clearInterval(metricsTimer);
+    metricsTimer = null;
+  }
+}
+
 async function shutdown(signal) {
   if (shuttingDown) {
     return;
@@ -81,7 +99,11 @@ async function shutdown(signal) {
   });
 
   stopHeartbeat();
+  stopMetricsDump();
   jobPoller.stop();
+  
+  // Dump metrics one last time on exit
+  logger.info({ event: "worker_metrics_dump_final" }, `\n${registry.metrics()}`);
 }
 
 async function start() {
@@ -97,6 +119,7 @@ async function start() {
     await sendHeartbeat();
 
     startHeartbeat();
+    startMetricsDump();
     jobPoller.start();
 
     logger.info("Worker is ready", {
@@ -121,3 +144,4 @@ process.on("SIGTERM", () => {
 });
 
 void start();
+

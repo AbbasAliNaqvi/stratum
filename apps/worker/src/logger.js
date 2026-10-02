@@ -1,6 +1,18 @@
 const timestamp = () => new Date().toISOString();
 
 export const logger = {
+  debug(message, meta = {}) {
+    console.debug(
+      JSON.stringify({
+        level: "debug",
+        service: "stratum-worker",
+        time: timestamp(),
+        message,
+        ...meta,
+      })
+    );
+  },
+
   info(message, meta = {}) {
     console.log(
       JSON.stringify({
