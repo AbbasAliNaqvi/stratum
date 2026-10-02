@@ -163,3 +163,82 @@ Final database state:
 - AI diagnostics engine
 - Policy/authorization engine
 - Self-healing mechanisms
+
+---
+
+## Milestone: CLI Foundation + Job Operations
+
+**Date:** 2026-10-02
+
+### Problem
+
+The control plane API was implemented, but interacting with it required manually crafting `curl` requests. A CLI was needed to provide a clean, human-readable interface for job submission and management, without duplicating existing business logic from the control plane.
+
+### What Was Built
+
+Created a new `@stratum/cli` package under `apps/cli` using `commander` for argument parsing. The CLI acts as a thin wrapper over the existing HTTP control plane APIs.
+
+#### CLI Core Structure
+- **bin/stratum.js**: Executable entry point.
+- **src/program.js**: Dependency-injected program builder (allows testing without real HTTP calls).
+- **src/config.js**: Simple environment-driven configuration (defaults `STRATUM_CONTROL_PLANE_URL` to `http://127.0.0.1:3000`).
+- **src/client.js**: Lightweight `fetch` wrapper mapping CLI actions to control plane routes (`POST /jobs`, `GET /jobs`, `GET /jobs/:id`, `POST /jobs/:id/cancel`).
+- **src/output.js**: Specialized output formatters for rendering human-readable tables, summaries, and JSON.
+- **src/commands/job.js**: The primary command namespace.
+
+#### Commands Implemented
+- `stratum job submit`: Submits a job. Supports `-t, --type`, `-p, --payload`, `--priority`, `--max-retries`, and `--idempotency-key`.
+- `stratum job list`: Lists jobs in a table. Supports `-s, --status` and `-t, --type` filters.
+- `stratum job status <id>`: Fetches and displays job state, metadata, and event history.
+- `stratum job cancel <id>`: Cancels a queued or running job.
+- `--json`: Every command supports a `--json` flag to return raw machine-readable data instead of human-formatted output.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `package.json` | Updated `test` script to use `--if-present`. |
+| `README.md` | Documented CLI architecture and commands; removed CLI from Roadmap. |
+| `apps/cli/package.json` | Created basic package configuration. |
+| `apps/cli/bin/stratum.js` | Created executable entry point. |
+| `apps/cli/src/program.js` | Created core program builder. |
+| `apps/cli/src/config.js` | Created environment configuration. |
+| `apps/cli/src/client.js` | Created control plane HTTP client. |
+| `apps/cli/src/output.js` | Created terminal formatters. |
+| `apps/cli/src/commands/job.js` | Implemented `job` subcommand suite. |
+| `apps/cli/src/cli.test.js` | Added comprehensive CLI test suite. |
+
+### Tests
+
+```
+src/cli.test.js       25/25
+```
+
+Test suite explicitly covers:
+1. Command parsing (help, version, subcommand help).
+2. Option parsing and type validation for job submission.
+3. Successful API responses and correct console output.
+4. JSON formatting when `--json` is provided.
+5. Error handling mapping HTTP 404/409/500 to user-friendly messages and correct non-zero exit codes.
+6. Network timeout/connection failure handling.
+
+### Integration Test Results
+
+Manually verified against a live local control plane:
+1. Ran `node apps/cli/bin/stratum.js job submit -t echo -p '{"msg":"hello"}' --json` -> Successfully submitted.
+2. Ran `node apps/cli/bin/stratum.js job status <id>` -> Successfully fetched and displayed human-readable summary + event log.
+3. Ran `node apps/cli/bin/stratum.js job list` -> Output correctly mapped jobs to a table.
+4. Ran `node apps/cli/bin/stratum.js job submit -t sleep -p '{"durationMs": 100000}' --json` followed by `job cancel <id>` -> Job successfully cancelled.
+5. *Cleaned up the test jobs manually from the database.*
+
+### Known Limitations
+
+- `job list` currently doesn't support pagination; it simply retrieves whatever the control plane returns.
+- Output tables might wrap unpleasantly if the terminal is too narrow.
+
+### Next Steps
+
+- Observability layer (metrics, structured logging)
+- AI diagnostics engine
+- Policy/authorization engine
+- Self-healing mechanisms

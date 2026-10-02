@@ -7,6 +7,7 @@ Distributed backend control plane for service orchestration, observability, inte
 ```text
 stratum/
 ├── apps/
+│   ├── cli/              # Command-line interface
 │   ├── control-plane/    # Fastify API server
 │   └── worker/           # Job execution worker
 ├── packages/             # Shared packages
@@ -161,9 +162,37 @@ npm run test --workspace=@stratum/control-plane
 npm run test --workspace=@stratum/worker
 ```
 
+### CLI
+
+The Stratum CLI allows you to interact with the control plane to manage jobs. It reads the `STRATUM_CONTROL_PLANE_URL` environment variable (default: `http://127.0.0.1:3000`).
+
+You can run the CLI via `npm` or by executing the binary directly:
+
+```bash
+# Get help and list commands
+node apps/cli/bin/stratum.js --help
+node apps/cli/bin/stratum.js job --help
+
+# Submit a job
+node apps/cli/bin/stratum.js job submit -t echo -p '{"msg":"hello"}' --priority 10
+
+# List all jobs
+node apps/cli/bin/stratum.js job list
+
+# List queued jobs
+node apps/cli/bin/stratum.js job list -s queued
+
+# Get job status
+node apps/cli/bin/stratum.js job status <job-id>
+
+# Cancel a job
+node apps/cli/bin/stratum.js job cancel <job-id>
+```
+
+Add `--json` to any command for machine-readable JSON output.
+
 ## Roadmap
 
-- [ ] CLI for job submission and status inspection
 - [ ] Observability (metrics, structured logging, tracing)
 - [ ] AI-powered diagnostics engine
 - [ ] Policy/authorization engine for AI-proposed actions

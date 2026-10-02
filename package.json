@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "npm run dev --workspace=@stratum/control-plane",
     "start": "npm run start --workspace=@stratum/control-plane",
-    "test": "npm run test --workspaces",
+    "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces",
     "format": "npm run format --workspaces",
     "db:generate": "drizzle-kit generate",
