@@ -139,9 +139,9 @@ describe("stratum cli", () => {
        */
       const combined = result.stdout + result.stderr;
 
-      expect(combined).toContain("submit");
+      expect(combined).toContain("run");
       expect(combined).toContain("list");
-      expect(combined).toContain("status");
+      expect(combined).toContain("inspect");
       expect(combined).toContain("cancel");
     });
   });
@@ -150,7 +150,7 @@ describe("stratum cli", () => {
    * ── Job Submit ───────────────────────────────────────────
    */
 
-  describe("job submit", () => {
+  describe("job run", () => {
     it("submits a job with required type", async () => {
       const client = createMockClient();
 
@@ -169,7 +169,7 @@ describe("stratum cli", () => {
 
       const result = await run(client, [
         "job",
-        "submit",
+        "run",
         "-t",
         "echo",
         "-p",
@@ -207,7 +207,7 @@ describe("stratum cli", () => {
 
       const result = await run(client, [
         "job",
-        "submit",
+        "run",
         "-t",
         "sleep",
         "-p",
@@ -251,7 +251,7 @@ describe("stratum cli", () => {
 
       const result = await run(client, [
         "job",
-        "submit",
+        "run",
         "-t",
         "echo",
         "--json",
@@ -268,7 +268,7 @@ describe("stratum cli", () => {
 
       const result = await run(client, [
         "job",
-        "submit",
+        "run",
         "-t",
         "echo",
         "-p",
@@ -284,7 +284,7 @@ describe("stratum cli", () => {
 
       const result = await run(client, [
         "job",
-        "submit",
+        "run",
         "-t",
         "echo",
         "--priority",
@@ -295,7 +295,7 @@ describe("stratum cli", () => {
       expect(result.stderr).toContain("Priority");
     });
 
-    it("handles API error on submit", async () => {
+    it("handles API error on run", async () => {
       const client = createMockClient();
 
       client.submitJob.mockRejectedValueOnce(
@@ -304,7 +304,7 @@ describe("stratum cli", () => {
 
       const result = await run(client, [
         "job",
-        "submit",
+        "run",
         "-t",
         "echo",
       ]);
@@ -455,7 +455,7 @@ describe("stratum cli", () => {
    * ── Job Status ───────────────────────────────────────────
    */
 
-  describe("job status", () => {
+  describe("job inspect", () => {
     it("shows detailed job status", async () => {
       const client = createMockClient();
 
@@ -490,7 +490,7 @@ describe("stratum cli", () => {
 
       const result = await run(client, [
         "job",
-        "status",
+        "inspect",
         "abc-123",
       ]);
 
@@ -522,7 +522,7 @@ describe("stratum cli", () => {
 
       const result = await run(client, [
         "job",
-        "status",
+        "inspect",
         "abc-123",
         "--json",
       ]);
@@ -543,7 +543,7 @@ describe("stratum cli", () => {
 
       const result = await run(client, [
         "job",
-        "status",
+        "inspect",
         "nonexistent",
       ]);
 
@@ -551,7 +551,7 @@ describe("stratum cli", () => {
       expect(result.stderr).toContain("not found");
     });
 
-    it("handles API error on status", async () => {
+    it("handles API error on inspect", async () => {
       const client = createMockClient();
 
       client.getJob.mockRejectedValueOnce(
@@ -560,7 +560,7 @@ describe("stratum cli", () => {
 
       const result = await run(client, [
         "job",
-        "status",
+        "inspect",
         "abc-123",
       ]);
 

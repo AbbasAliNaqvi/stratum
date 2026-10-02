@@ -6,6 +6,22 @@ Distributed backend control plane for service orchestration, observability, inte
 
 📖 **User Guide:** [docs/HOW_TO_USE_STRATUM.md](docs/HOW_TO_USE_STRATUM.md) - Start here if you are new to Stratum!
 
+## Quick Start
+
+Stratum provides a unified CLI to manage its components automatically.
+
+```bash
+# 1. Install
+npm install
+npm link
+
+# 2. Initialize (connects to DB, runs migrations, starts services)
+stratum init
+
+# 3. Open the Control Panel
+stratum
+```
+
 ## Architecture
 
 ```text

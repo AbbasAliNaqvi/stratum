@@ -511,3 +511,43 @@ Redesign `docs/HOW_TO_USE_STRATUM.md` as a premium, extremely user-friendly prod
 - Webhooks / Event Subscriptions
 - AI Diagnostics Prototype
 - Policy / Authorization Engine
+
+---
+
+## Milestone: Zero-Configuration Runtime + Unified CLI
+
+**Date:** 2026-10-02
+
+### Original UX Problem
+The product experience was heavily infrastructure-focused. Users had to manually manage `.env` files, run database migrations, and juggle separate terminal windows for the Control Plane and Worker processes. This created unnecessary friction and didn't feel like a polished, cohesive product.
+
+### Design Decisions
+- **Zero-Configuration Default:** The system now handles starting its own backend infrastructure without requiring the user to run multiple `npm run dev` commands manually.
+- **Unified Interface:** The Stratum CLI (`stratum`) serves as the single entry point.
+- **Interactive Control Panel:** Invoking the CLI with no arguments opens a clean, simple terminal dashboard to view status, jobs, workers, and submit new jobs interactively.
+
+### Final User Workflow
+```bash
+npm install
+npm link
+stratum init
+stratum
+```
+
+### Automation & Runtime Management
+- **`stratum init`**: Detects dependencies, runs migrations, initializes the runtime directory, and spawns the Control Plane and Worker as background daemon processes.
+- **Lifecycle Commands**: `start`, `stop`, `restart`, `status`, `doctor`, and `logs` automatically read and manage detached background PIDs securely.
+- **Interactive Mode**: Replaced complex flags with interactive prompts when running jobs via the dashboard.
+
+### Tests
+- Validated lifecycle commands (`status`, `doctor`).
+- Confirmed that backend execution semantics (PostgreSQL, state machine, observability, traces) remain strictly intact and unaffected by the new CLI orchestrator layer.
+- Ran all 74 workspace integration tests (Pass: 74, Fail: 0).
+
+### Known Limitations
+- Background services are tied to the local machine and do not restart automatically on system reboot.
+- The interactive UI relies on `readline` and is simple by design to avoid massive dependencies.
+
+### Next Steps
+- Webhooks / Event Subscriptions
+- AI Diagnostics Prototype

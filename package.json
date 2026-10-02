@@ -8,6 +8,9 @@
     "apps/*",
     "packages/*"
   ],
+  "bin": {
+    "stratum": "./apps/cli/bin/stratum.js"
+  },
   "scripts": {
     "dev": "npm run dev --workspace=@stratum/control-plane",
     "start": "npm run start --workspace=@stratum/control-plane",

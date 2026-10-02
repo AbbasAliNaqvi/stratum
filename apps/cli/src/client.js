@@ -9,63 +9,74 @@ export class ApiError extends Error {
   }
 }
 
+import { withSpan } from "@stratum/tracing";
+
 async function request(path, options = {}) {
-  const controller = new AbortController();
+  const method = options.method || "GET";
 
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, config.REQUEST_TIMEOUT_MS);
+  return withSpan(`CLI ${method} ${path}`, async (span) => {
+    const controller = new AbortController();
 
-  try {
-    const response = await fetch(
-      `${config.CONTROL_PLANE_URL}${path}`,
-      {
-        ...options,
-        signal: controller.signal,
-        headers: {
-          ...(options.body
-            ? { "content-type": "application/json" }
-            : {}),
-          ...(options.headers ?? {}),
-        },
-      },
-    );
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, config.REQUEST_TIMEOUT_MS);
 
-    const text = await response.text();
-
-    let body = null;
-
-    if (text) {
-      try {
-        body = JSON.parse(text);
-      } catch {
-        body = text;
-      }
-    }
-
-    if (!response.ok) {
-      throw new ApiError(
-        body?.error ??
-          `Request failed with status ${response.status}`,
+    try {
+      const response = await fetch(
+        `${config.CONTROL_PLANE_URL}${path}`,
         {
-          status: response.status,
-          body,
+          ...options,
+          signal: controller.signal,
+          headers: {
+            "traceparent": span.getTraceparent(),
+            ...(options.body
+              ? { "content-type": "application/json" }
+              : {}),
+            ...(options.headers ?? {}),
+          },
         },
       );
-    }
 
-    return body;
-  } catch (error) {
-    if (error.name === "AbortError") {
-      throw new ApiError(
-        `Request timed out after ${config.REQUEST_TIMEOUT_MS}ms`,
-      );
-    }
+      const text = await response.text();
 
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+      let body = null;
+
+      if (text) {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = text;
+        }
+      }
+
+      if (!response.ok) {
+        throw new ApiError(
+          body?.error ??
+            `Request failed with status ${response.status}`,
+          {
+            status: response.status,
+            body,
+          },
+        );
+      }
+
+      span.setStatus("ok");
+      return body;
+    } catch (error) {
+      if (error.name === "AbortError") {
+        const err = new ApiError(
+          `Request timed out after ${config.REQUEST_TIMEOUT_MS}ms`,
+        );
+        span.recordException(err);
+        throw err;
+      }
+
+      span.recordException(error);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
 }
 
 export function createClient() {
@@ -108,5 +119,15 @@ export function createClient() {
         },
       );
     },
+
+    async getNodes() {
+      return request("/nodes");
+    },
+
+    async getHealth() {
+      return request("/health");
+    },
+
+    baseUrl: config.CONTROL_PLANE_URL
   };
 }

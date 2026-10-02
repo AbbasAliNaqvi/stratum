@@ -155,3 +155,7 @@ coverage/
 
 .vscode/
 .idea/
+
+# Stratum Runtime Data
+.stratum/
+job.json

@@ -14,11 +14,11 @@ export function registerJobCommands(program, { client }) {
     .description("Manage jobs");
 
   /*
-   * stratum job submit
+   * stratum job run
    */
   job
-    .command("submit")
-    .description("Submit a new job to the control plane")
+    .command("run")
+    .description("Run a new job in the control plane")
     .requiredOption("-t, --type <type>", "Job type (e.g. echo, sleep)")
     .option("-p, --payload <json>", "Job payload as JSON string", "{}")
     .option("--priority <number>", "Job priority (higher = sooner)", "0")
@@ -123,11 +123,11 @@ export function registerJobCommands(program, { client }) {
     });
 
   /*
-   * stratum job status <id>
+   * stratum job inspect <id>
    */
   job
-    .command("status")
-    .description("Show detailed job status")
+    .command("inspect")
+    .description("Inspect detailed job status")
     .argument("<id>", "Job ID")
     .option("--json", "Output as JSON")
     .action(async (id, options) => {
