@@ -1,4 +1,17 @@
+import { getActiveSpan } from "@stratum/tracing";
+
 const timestamp = () => new Date().toISOString();
+
+function getTraceMeta() {
+  const span = getActiveSpan();
+  if (span) {
+    return {
+      traceId: span.traceId,
+      spanId: span.spanId,
+    };
+  }
+  return {};
+}
 
 export const logger = {
   debug(message, meta = {}) {
@@ -8,6 +21,7 @@ export const logger = {
         service: "stratum-worker",
         time: timestamp(),
         message,
+        ...getTraceMeta(),
         ...meta,
       })
     );
@@ -20,6 +34,7 @@ export const logger = {
         service: "stratum-worker",
         time: timestamp(),
         message,
+        ...getTraceMeta(),
         ...meta,
       })
     );
@@ -32,6 +47,7 @@ export const logger = {
         service: "stratum-worker",
         time: timestamp(),
         message,
+        ...getTraceMeta(),
         ...meta,
       })
     );
@@ -44,6 +60,7 @@ export const logger = {
         service: "stratum-worker",
         time: timestamp(),
         message,
+        ...getTraceMeta(),
         ...meta,
       })
     );

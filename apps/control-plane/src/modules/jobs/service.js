@@ -26,8 +26,11 @@ import {
   jobsLeaseRenewalFailuresTotal,
   jobExecutionDuration,
   jobWaitDuration,
-  jobsQueuedGauge
+  jobsQueuedGauge,
+  jobTransitionsTotal
 } from "../metrics/index.js";
+
+import { getActiveSpan } from "@stratum/tracing";
 
 export async function createJob(input) {
   if (input.idempotencyKey) {
@@ -40,13 +43,20 @@ export async function createJob(input) {
     }
   }
 
+  let traceparent = null;
+  const span = getActiveSpan();
+  if (span) {
+    traceparent = span.getTraceparent();
+  }
+
   const { job } = await createJobWithEvent(
     {
       type: input.type,
       payload: input.payload,
       priority: input.priority ?? 0,
       maxRetries: input.maxRetries ?? 3,
-      idempotencyKey: input.idempotencyKey ?? null
+      idempotencyKey: input.idempotencyKey ?? null,
+      traceparent
     },
     {
       eventType: "queued",
@@ -96,19 +106,27 @@ export async function claimJob(input) {
     const { job } = result;
     jobsClaimedTotal.inc({ job_type: job.type });
     jobsQueuedGauge.dec({ job_type: job.type });
-    
+
     if (job.createdAt) {
       const waitTime = (Date.now() - new Date(job.createdAt).getTime()) / 1000;
       jobWaitDuration.observe({ job_type: job.type }, Math.max(0, waitTime));
     }
-    
+
+    const fromStatus = job.leaseToken > 1 ? "running" : "queued";
+    const reason = job.leaseToken > 1 ? "reclaim" : "claim";
+
+    jobTransitionsTotal.inc({ from: fromStatus, to: job.status, reason });
+
     logger.info({
-      event: "job_claimed",
+      event: "job_transition",
+      transitionEvent: "job_claimed",
       jobId: job.id,
       jobType: job.type,
       nodeId: job.lockedBy,
       leaseToken: job.leaseToken,
-      status: job.status
+      fromStatus: job.leaseToken > 1 ? "running" : "queued",
+      toStatus: job.status,
+      reason: job.leaseToken > 1 ? "reclaim" : "claim"
     }, `Job ${job.id} claimed by node ${job.lockedBy}`);
   }
 
@@ -133,24 +151,32 @@ export async function completeJob(input) {
 
     if (job.status === "succeeded") {
       jobsCompletedTotal.inc({ job_type: job.type });
+      jobTransitionsTotal.inc({ from: "running", to: job.status, reason: "execution_success" });
       logger.info({
-        event: "job_completed",
+        event: "job_transition",
+        transitionEvent: "job_completed",
         jobId: job.id,
         jobType: job.type,
         nodeId: input.nodeId,
         leaseToken: input.leaseToken,
-        status: job.status,
+        fromStatus: "running",
+        toStatus: job.status,
+        reason: "execution_success",
         durationMs: execTime !== undefined ? execTime * 1000 : undefined
       }, `Job ${job.id} completed successfully`);
     } else if (job.status === "failed") {
       jobsFailedTotal.inc({ job_type: job.type, reason: "execution_failed" });
+      jobTransitionsTotal.inc({ from: "running", to: job.status, reason: "execution_failed" });
       logger.error({
-        event: "job_failed",
+        event: "job_transition",
+        transitionEvent: "job_failed",
         jobId: job.id,
         jobType: job.type,
         nodeId: input.nodeId,
         leaseToken: input.leaseToken,
-        status: job.status,
+        fromStatus: "running",
+        toStatus: job.status,
+        reason: "execution_failed",
         durationMs: execTime !== undefined ? execTime * 1000 : undefined
       }, `Job ${job.id} failed during execution`);
     }
@@ -161,24 +187,30 @@ export async function completeJob(input) {
 
 export async function reclaimJobsForNode(nodeId) {
   const reclaimed = await reclaimJobsForNodeRepository(nodeId);
-  
-  for (const job of reclaimed) {
+
+    for (const job of reclaimed) {
     jobsReclaimedTotal.inc({ job_type: job.type });
     if (job.status === "queued") {
       jobsQueuedGauge.inc({ job_type: job.type });
     } else if (job.status === "failed") {
       jobsFailedTotal.inc({ job_type: job.type, reason: "reclaim_failed_max_retries" });
     }
-    
+
+    const reason = job.status === "failed" ? "reclaim_failed_max_retries" : "node_unreachable";
+    jobTransitionsTotal.inc({ from: "running", to: job.status, reason });
+
     logger.warn({
-      event: "job_reclaimed",
+      event: "job_transition",
+      transitionEvent: "job_reclaimed",
       jobId: job.id,
       jobType: job.type,
       nodeId: nodeId,
-      status: job.status
+      fromStatus: "running",
+      toStatus: job.status,
+      reason: job.status === "failed" ? "reclaim_failed_max_retries" : "node_unreachable"
     }, `Job ${job.id} reclaimed from node ${nodeId}`);
   }
-  
+
   return reclaimed;
 }
 
@@ -187,7 +219,7 @@ export async function requestJobCancellation(jobId) {
   if (result && result.job) {
     const { job } = result;
     jobsCancelRequestedTotal.inc({ job_type: job.type });
-    
+
     logger.info({
       event: "cancellation_requested",
       jobId: job.id,
@@ -198,12 +230,16 @@ export async function requestJobCancellation(jobId) {
     if (job.status === "cancelled") {
       jobsCancelledTotal.inc({ job_type: job.type });
       jobsQueuedGauge.dec({ job_type: job.type });
-      
+      jobTransitionsTotal.inc({ from: "queued", to: job.status, reason: "cancellation_requested" });
+
       logger.info({
-        event: "job_cancelled",
+        event: "job_transition",
+        transitionEvent: "job_cancelled",
         jobId: job.id,
         jobType: job.type,
-        status: job.status
+        fromStatus: "queued",
+        toStatus: job.status,
+        reason: "cancellation_requested"
       }, `Job ${job.id} cancelled`);
     }
   }
@@ -215,14 +251,18 @@ export async function acknowledgeJobCancellation(input) {
   if (result && result.job && result.job.status === "cancelled") {
     const { job } = result;
     jobsCancelledTotal.inc({ job_type: job.type });
-    
+    jobTransitionsTotal.inc({ from: "running", to: job.status, reason: "cancellation_acknowledged" });
+
     logger.info({
-      event: "cancellation_acknowledged",
+      event: "job_transition",
+      transitionEvent: "cancellation_acknowledged",
       jobId: job.id,
       jobType: job.type,
       nodeId: input.nodeId,
       leaseToken: input.leaseToken,
-      status: job.status
+      fromStatus: "running",
+      toStatus: job.status,
+      reason: "cancellation_acknowledged"
     }, `Cancellation acknowledged for job ${job.id} by node ${input.nodeId}`);
   }
   return result;

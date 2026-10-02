@@ -59,7 +59,7 @@ export async function jobRoutes(app) {
     } catch (error) {
       request.log.error(error);
 
-      if (error.code === "NODE_NOT_REGISTERED") {
+      if (error.code === "NODE_NOT_REGISTERED" || error.code === "INVALID_STATE_TRANSITION") {
         return reply.code(409).send({
           error: error.message,
         });
@@ -101,6 +101,10 @@ export async function jobRoutes(app) {
     } catch (error) {
       request.log.error(error);
 
+      if (error.code === "INVALID_STATE_TRANSITION") {
+        return reply.code(409).send({ error: error.message });
+      }
+
       return reply.code(500).send({
         error: "Failed to complete job",
       });
@@ -139,6 +143,10 @@ export async function jobRoutes(app) {
       });
     } catch (error) {
       request.log.error(error);
+
+      if (error.code === "INVALID_STATE_TRANSITION") {
+        return reply.code(409).send({ error: error.message });
+      }
 
       return reply.code(500).send({
         error: "Failed to cancel job",
@@ -196,6 +204,10 @@ export async function jobRoutes(app) {
     } catch (error) {
       request.log.error(error);
 
+      if (error.code === "INVALID_STATE_TRANSITION") {
+        return reply.code(409).send({ error: error.message });
+      }
+
       return reply.code(500).send({
         error: "Failed to acknowledge job cancellation",
       });
@@ -228,6 +240,10 @@ export async function jobRoutes(app) {
       return reply.send({ job });
     } catch (error) {
       request.log.error(error);
+
+      if (error.code === "INVALID_STATE_TRANSITION") {
+        return reply.code(409).send({ error: error.message });
+      }
 
       return reply.code(500).send({
         error: "Failed to renew job lease",

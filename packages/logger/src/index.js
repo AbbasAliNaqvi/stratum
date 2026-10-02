@@ -1,4 +1,5 @@
 import pino from "pino";
+import { getActiveSpan } from "@stratum/tracing";
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
@@ -9,7 +10,7 @@ const transport = isDevelopment
         colorize: true,
         translateTime: "HH:MM:ss",
         ignore:
-          "pid,hostname,service,reqId,method,url,statusCode,responseTime",
+          "pid,hostname,service,reqId,method,url,statusCode,responseTime,traceId,spanId",
         singleLine: true
       }
     })
@@ -21,6 +22,20 @@ export const logger = pino(
 
     base: {
       service: "stratum-control-plane"
+    },
+
+    formatters: {
+      log: (object) => {
+        const span = getActiveSpan();
+        if (span) {
+          return {
+            traceId: span.traceId,
+            spanId: span.spanId,
+            ...object
+          };
+        }
+        return object;
+      }
     }
   },
   transport

@@ -22,6 +22,13 @@
       "when": 1786217712511,
       "tag": "0002_loose_grim_reaper",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790934364475,
+      "tag": "0003_steep_tiger_shark",
+      "breakpoints": true
     }
   ]
 }

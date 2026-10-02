@@ -11,6 +11,7 @@ import {
   workerLeaseLostTotal,
   workerPollErrorsTotal
 } from "./metrics.js";
+import { withSpan } from "@stratum/tracing";
 
 export function createJobPoller({
   client,
@@ -251,146 +252,149 @@ export function createJobPoller({
       }
 
       const job = result.job;
-      const leaseToken =
-        job.leaseToken;
-        
-      workerJobsClaimedTotal.inc({ job_type: job.type });
+      const leaseToken = job.leaseToken;
 
-      logger.info(
-        "Job claimed",
-        {
-          jobId: job.id,
-          type: job.type,
-          leaseToken,
-        }
-      );
+      await withSpan("worker.execute", { traceparent: job.traceparent, attributes: { "job.type": job.type } }, async (span) => {
+        workerJobsClaimedTotal.inc({ job_type: job.type });
 
-      executing = true;
-
-      const controller =
-        new AbortController();
-
-      const state = {
-        cancelRequested:
-          Boolean(
-            job.cancelRequestedAt
-          ),
-        leaseLost: false,
-        finished: false,
-      };
-
-      const stopLeaseRenewal =
-        startLeaseRenewal(
-          job,
-          leaseToken,
-          state
+        logger.info(
+          "Job claimed",
+          {
+            jobId: job.id,
+            type: job.type,
+            leaseToken,
+          }
         );
 
-      const cancellationWatcher =
-        watchForCancellation(
-          job,
-          controller,
-          state
-        );
+        executing = true;
 
-      const startTime = Date.now();
+        const controller =
+          new AbortController();
 
-      try {
-        if (state.cancelRequested) {
-          controller.abort();
-        }
+        const state = {
+          cancelRequested:
+            Boolean(
+              job.cancelRequestedAt
+            ),
+          leaseLost: false,
+          finished: false,
+        };
 
-        const executionResult =
-          await executeJob(job, {
-            signal:
-              controller.signal,
-          });
-
-        state.finished = true;
-        
-        workerJobExecutionDuration.observe({ job_type: job.type }, (Date.now() - startTime) / 1000);
-
-        await cancellationWatcher;
-
-        if (state.cancelRequested) {
-          await handleCancelledJob(
+        const stopLeaseRenewal =
+          startLeaseRenewal(
             job,
             leaseToken,
             state
           );
 
-          return;
-        }
+        const cancellationWatcher =
+          watchForCancellation(
+            job,
+            controller,
+            state
+          );
 
-        if (state.leaseLost) {
-          logger.warn(
-            "Skipping completion because lease was lost",
+        const startTime = Date.now();
+
+        try {
+          if (state.cancelRequested) {
+            controller.abort();
+          }
+
+          const executionResult =
+            await executeJob(job, {
+              signal:
+                controller.signal,
+            });
+
+          state.finished = true;
+
+          workerJobExecutionDuration.observe({ job_type: job.type }, (Date.now() - startTime) / 1000);
+
+          await cancellationWatcher;
+
+          if (state.cancelRequested) {
+            await handleCancelledJob(
+              job,
+              leaseToken,
+              state
+            );
+
+            return;
+          }
+
+          if (state.leaseLost) {
+            logger.warn(
+              "Skipping completion because lease was lost",
+              {
+                jobId: job.id,
+                leaseToken,
+              }
+            );
+
+            return;
+          }
+
+          await client.completeJob(
+            job.id,
+            leaseToken,
+            executionResult
+          );
+
+          workerJobsCompletedTotal.inc({ job_type: job.type });
+
+          logger.info(
+            "Job completed",
             {
               jobId: job.id,
+              type: job.type,
               leaseToken,
             }
           );
+          span.setStatus("ok");
+        } catch (error) {
+          state.finished = true;
 
-          return;
-        }
+          controller.abort();
 
-        await client.completeJob(
-          job.id,
-          leaseToken,
-          executionResult
-        );
-        
-        workerJobsCompletedTotal.inc({ job_type: job.type });
+          await cancellationWatcher;
 
-        logger.info(
-          "Job completed",
-          {
-            jobId: job.id,
-            type: job.type,
-            leaseToken,
+          if (
+            state.cancelRequested ||
+            error.code === "JOB_CANCELLED"
+          ) {
+            await handleCancelledJob(
+              job,
+              leaseToken,
+              {
+                ...state,
+                cancelRequested: true,
+              }
+            );
+
+            return;
           }
-        );
-      } catch (error) {
-        state.finished = true;
 
-        controller.abort();
+          workerJobsFailedTotal.inc({ job_type: job.type });
 
-        await cancellationWatcher;
-
-        if (
-          state.cancelRequested ||
-          error.code === "JOB_CANCELLED"
-        ) {
-          await handleCancelledJob(
-            job,
-            leaseToken,
+          logger.error(
+            "Job execution failed",
             {
-              ...state,
-              cancelRequested: true,
+              jobId: job.id,
+              type: job.type,
+              leaseToken,
+              error: error.message,
             }
           );
+          span.recordException(error);
+        } finally {
+          state.finished = true;
 
-          return;
+          stopLeaseRenewal();
+
+          executing = false;
         }
-        
-        workerJobsFailedTotal.inc({ job_type: job.type });
-
-        logger.error(
-          "Job execution failed",
-          {
-            jobId: job.id,
-            type: job.type,
-            leaseToken,
-            error: error.message,
-          }
-        );
-      } finally {
-        state.finished = true;
-
-        stopLeaseRenewal();
-
-        executing = false;
-      }
+      });
     } catch (error) {
       workerPollErrorsTotal.inc();
       logger.error(

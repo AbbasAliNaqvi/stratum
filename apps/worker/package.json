@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@stratum/metrics": "^0.1.0"
+    "@stratum/metrics": "^0.1.0",
+    "@stratum/tracing": "*"
   }
 }

@@ -113,6 +113,8 @@ export const jobs = pgTable(
 
     error: text("error"),
 
+    traceparent: text("traceparent"),
+
     cancelRequestedAt: timestamp("cancel_requested_at", {
       withTimezone: true
     }),

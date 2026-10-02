@@ -60,6 +60,11 @@ export const jobsQueuedGauge = registry.gauge({
   help: "Current number of queued jobs"
 });
 
+export const jobTransitionsTotal = registry.counter({
+  name: "stratum_job_transitions_total",
+  help: "Total state machine transitions"
+});
+
 // Node Metrics
 export const nodesRegisteredTotal = registry.counter({
   name: "stratum_nodes_registered_total",
