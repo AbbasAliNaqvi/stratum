@@ -2,6 +2,10 @@
 
 Distributed backend control plane for service orchestration, observability, intelligent diagnostics, and automated remediation.
 
+## Documentation
+
+📖 **User Guide:** [docs/HOW_TO_USE_STRATUM.md](docs/HOW_TO_USE_STRATUM.md) - Start here if you are new to Stratum!
+
 ## Architecture
 
 ```text
@@ -118,6 +122,26 @@ The Control Plane exposes a metrics endpoint:
 - **Lease Operations:** Renewals and renewal failures.
 - **HTTP/API:** Request counts and duration histograms by route and status.
 - **Worker Dumps:** Since the worker does not run an HTTP server, it periodically dumps its metrics into the logs in the Prometheus format.
+
+#### Distributed Tracing
+
+Stratum implements an in-process, dependency-free distributed tracing foundation based on the `traceparent` (W3C) specification. It utilizes `AsyncLocalStorage` in Node.js to propagate trace context across asynchronous execution boundaries.
+
+To enable tracing, set `STRATUM_TRACING_ENABLED=true` in your environment.
+
+When enabled, traces are:
+1. **Initiated in the CLI**: A root trace context is created.
+2. **Propagated via HTTP**: Passed over the network using `traceparent` headers.
+3. **Captured in the Control Plane**: Preserved across route handling, service logic, and database interactions.
+4. **Persisted with Jobs**: Trace context is saved to the PostgreSQL `jobs` table.
+5. **Propagated to Workers**: Restored by the worker upon job claim and preserved throughout the job's execution and lease renewal lifecycle.
+6. **Correlated in Logs**: Standard structured JSON logs automatically include `traceId` and `spanId` if a span is active.
+
+Example trace output in logs:
+```json
+{"level":"info","service":"stratum-worker","time":"2026-10-02T10:00:25Z","message":"Job claimed","traceId":"b6b64dbc4429660484d872bdde28ed40","spanId":"fd80414219a7eabd"}
+{"event":"span.ended","name":"worker.execute","traceId":"b6b64dbc4429660484d872bdde28ed40","spanId":"fd80414219a7eabd","parentSpanId":"ea11398794bb8ea2","durationMs":523,"status":"ok"}
+```
 
 ## Setup
 

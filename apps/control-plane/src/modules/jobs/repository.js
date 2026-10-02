@@ -12,6 +12,7 @@ import {
 
 import { db } from "../../db/client.js";
 import { jobs, jobEvents, nodes } from "../../db/schema.js";
+import { assertValidTransition } from "./state.js";
 
 export async function insertJob(data) {
   const [job] = await db.insert(jobs).values(data).returning();
@@ -109,7 +110,6 @@ export async function getJobByIdempotencyKey(idempotencyKey) {
 export async function claimNextJob({ nodeId, leaseDurationMs }) {
   return db.transaction(async (tx) => {
     const now = new Date();
-
     const leaseExpiresAt = new Date(now.getTime() + leaseDurationMs);
 
     const [node] = await tx
@@ -122,11 +122,36 @@ export async function claimNextJob({ nodeId, leaseDurationMs }) {
 
     if (!node) {
       const error = new Error(`Node '${nodeId}' is not registered`);
-
       error.code = "NODE_NOT_REGISTERED";
-
       throw error;
     }
+
+    const [candidate] = await tx
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          lte(jobs.runAfter, now),
+          or(
+            eq(jobs.status, "queued"),
+            and(
+              eq(jobs.status, "running"),
+              sql`${jobs.leaseExpiresAt} <= ${now}`,
+            ),
+          ),
+        ),
+      )
+      .orderBy(desc(jobs.priority), asc(jobs.createdAt))
+      .limit(1)
+      .for("update", {
+        skipLocked: true,
+      });
+
+    if (!candidate) {
+      return null;
+    }
+
+    assertValidTransition(candidate.status, "running");
 
     const [job] = await tx
       .update(jobs)
@@ -138,41 +163,10 @@ export async function claimNextJob({ nodeId, leaseDurationMs }) {
         startedAt: now,
         updatedAt: now,
       })
-      .where(
-        eq(
-          jobs.id,
-          tx
-            .select({
-              id: jobs.id,
-            })
-            .from(jobs)
-            .where(
-              and(
-                lte(jobs.runAfter, now),
-                or(
-                  eq(jobs.status, "queued"),
-                  and(
-                    eq(jobs.status, "running"),
-                    sql`${jobs.leaseExpiresAt} <= ${now}`,
-                  ),
-                ),
-              ),
-            )
-            .orderBy(desc(jobs.priority), asc(jobs.createdAt))
-            .limit(1)
-            .for("update", {
-              skipLocked: true,
-            }),
-        ),
-      )
+      .where(eq(jobs.id, candidate.id))
       .returning();
 
-    if (!job) {
-      return null;
-    }
-
     const eventType = job.leaseToken > 1 ? "reclaimed" : "claimed";
-
     const message =
       eventType === "reclaimed"
         ? `Job reclaimed by node ${nodeId}`
@@ -203,6 +197,17 @@ export async function completeJob({
 }) {
   return db.transaction(async (tx) => {
     const now = new Date();
+
+    const [currentJob] = await tx
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1)
+      .for("update");
+
+    if (!currentJob) return null;
+
+    assertValidTransition(currentJob.status, "succeeded");
 
     const [job] = await tx
       .update(jobs)
@@ -254,19 +259,23 @@ export async function reclaimJobsForNode(nodeId) {
     const runningJobs = await tx
       .select()
       .from(jobs)
-      .where(and(eq(jobs.status, "running"), eq(jobs.lockedBy, nodeId)));
+      .where(and(eq(jobs.status, "running"), eq(jobs.lockedBy, nodeId)))
+      .for("update");
 
     const reclaimedJobs = [];
 
     for (const currentJob of runningJobs) {
       const shouldFail = currentJob.retryCount >= currentJob.maxRetries;
+      const targetState = shouldFail ? "failed" : "queued";
+      
+      assertValidTransition(currentJob.status, targetState);
 
       const nextRetryCount = currentJob.retryCount + 1;
 
       const [job] = await tx
         .update(jobs)
         .set({
-          status: shouldFail ? "failed" : "queued",
+          status: targetState,
           retryCount: shouldFail ? currentJob.retryCount : nextRetryCount,
 
           lockedBy: null,
@@ -372,6 +381,8 @@ export async function requestJobCancellation(jobId) {
      * no worker owns them.
      */
     if (currentJob.status === "queued") {
+      assertValidTransition(currentJob.status, "cancelled");
+
       const [job] = await tx
         .update(jobs)
         .set({
@@ -508,6 +519,8 @@ export async function acknowledgeJobCancellation({
         error: "CANCELLATION_NOT_REQUESTED",
       };
     }
+
+    assertValidTransition(currentJob.status, "cancelled");
 
     const [job] = await tx
       .update(jobs)

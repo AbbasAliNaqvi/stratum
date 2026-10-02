@@ -322,3 +322,192 @@ Manually verified against a live local control plane and worker:
 - AI diagnostics engine
 - Policy/authorization engine
 - Self-healing mechanisms
+
+---
+
+## Milestone: Distributed Tracing Foundation
+
+**Date:** 2026-10-02
+
+### Problem
+
+While metrics and structured logging provided basic visibility, it was impossible to correlate the lifecycle of a job across multiple asynchronous boundaries and distributed components. When a job was submitted via the CLI, executed by a worker, and completed, there was no unified identifier or context tying those operations together, making debugging difficult.
+
+### What Was Built
+
+Implemented an in-process, dependency-free distributed tracing foundation based on the W3C `traceparent` specification, utilizing `node:async_hooks` to propagate trace context across execution boundaries.
+
+#### `packages/tracing`
+- Created a standalone tracing package utilizing `AsyncLocalStorage` to manage the active span context.
+- Implemented `Span` objects with `traceId`, `spanId`, `parentSpanId`, `attributes`, `status`, and `error`.
+- Built W3C `traceparent` parsing and serialization.
+- Created an extensible exporter interface, including a `ConsoleExporter` (configured via `STRATUM_TRACING_ENABLED`) and `InMemoryExporter` (for testing).
+
+#### CLI Tracing
+- Automatically creates a root trace span for each CLI command invocation.
+- Propagates the `traceparent` context downstream via HTTP headers to the control plane.
+
+#### Control Plane Tracing
+- Wrapped Fastify route handlers in a trace context using the `onRequest` hook.
+- Extracted incoming `traceparent` headers to establish parent-child relationships for incoming HTTP requests.
+- Added a `traceparent` column to the `jobs` database table.
+- Preserved the trace context at job creation time by injecting `traceparent` into the job row.
+
+#### Worker Tracing
+- Restored trace context from the `job.traceparent` field upon job claim.
+- Wrapped the entire job execution lifecycle (including claims, executions, completions, and lease renewals) inside a `worker.execute` span.
+- Automatically associated all worker structured logs with the active `traceId` and `spanId`.
+
+#### Correlated Logging
+- Integrated `@stratum/tracing` with `@stratum/logger`.
+- Configured Pino log formatters to automatically inject `traceId` and `spanId` into all JSON logs when an active trace context exists, enabling seamless correlation in log aggregators.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `packages/tracing/*` | Built tracing implementation from scratch |
+| `packages/logger/package.json` | Added tracing dependency |
+| `packages/logger/src/index.js` | Configured Pino formatter to inject trace IDs |
+| `apps/control-plane/package.json` | Added tracing dependency |
+| `apps/control-plane/src/app.js` | Fastify middleware to start spans from headers |
+| `apps/control-plane/src/db/schema.js` | Added `traceparent` column to `jobs` table |
+| `apps/control-plane/src/modules/jobs/service.js` | Persisted traceparent during job creation |
+| `apps/worker/package.json` | Added tracing dependency |
+| `apps/worker/src/logger.js` | Configured worker logger to inject trace IDs |
+| `apps/worker/src/poller.js` | Wrapped job execution in span |
+| `apps/cli/package.json` | Added tracing dependency |
+| `apps/cli/src/client.js` | Wrapped CLI requests in span and passed headers |
+
+### Tests
+
+```
+packages/tracing (index.test.js)   7/7 ✅
+control-plane tests               18/18 ✅
+worker tests                       7/7 ✅
+cli tests                         25/25 ✅
+
+TOTAL                             57/57 ✅
+```
+
+### Integration Test Results
+
+Manually verified full end-to-end tracing in an active cluster:
+1. Ran CP and Worker with `STRATUM_TRACING_ENABLED=true`.
+2. Submitted job via CLI: `node apps/cli/bin/stratum.js job submit -t echo ...`
+3. Verified the CLI emitted a root span: `{"name":"CLI POST /jobs", "traceId":"<ID>"}`
+4. Verified the CP emitted an HTTP span inheriting the `traceId` and pointing to the CLI's `spanId` as `parentSpanId`.
+5. Verified the Worker logs all correctly included the exact same `traceId`, and the final `worker.execute` span pointed back to the CP's HTTP span as its parent.
+6. Tested a long-running `sleep` job and verified that mid-execution logs (like lease renewals) automatically inherited the trace context.
+
+### Next Steps
+
+- Job State Machine (Transitions)
+- Webhooks / Event Subscriptions
+- AI Diagnostics Prototype
+- Policy / Authorization Engine
+- Self-Healing Operations
+
+---
+
+## Milestone: Explicit Job State Machine + Atomic Transitions
+
+**Date:** 2026-10-02
+
+### Problem
+
+The job lifecycle status updates were scattered across `repository.js`. There was no centralized source of truth defining which states existed and what transitions were permissible. This lack of validation risked race conditions, data inconsistencies, and unintended behavior, such as a cancelled job becoming succeeded, or a running job accidentally reverting to queued through an invalid path.
+
+### What Was Built
+
+Introduced a strictly enforced, centralized state machine for the job lifecycle, preventing any invalid state mutations before they reach the database.
+
+#### State Machine Definition
+- Created `apps/control-plane/src/modules/jobs/state.js`.
+- Defined a `JOB_STATES` enum (queued, running, succeeded, failed, cancelled).
+- Configured a `VALID_TRANSITIONS` registry specifying exactly which transitions are allowed.
+- Exported an `assertValidTransition(from, to)` helper that throws an `INVALID_STATE_TRANSITION` error if an invalid transition is attempted.
+- Validated that terminal states (succeeded, failed, cancelled) can transition to themselves (idempotency) but cannot transition out.
+
+#### Repository Refactor
+- Integrated `assertValidTransition` across all state-mutating functions in `repository.js`:
+  - `claimNextJob` (queued/running -> running)
+  - `completeJob` (running -> succeeded/failed)
+  - `reclaimJobsForNode` (running -> queued/failed)
+  - `requestJobCancellation` (queued -> cancelled)
+  - `acknowledgeJobCancellation` (running -> cancelled)
+- Refactored functions like `completeJob` to explicitly read the target row `FOR UPDATE` first to fetch its current status, validate the transition using `assertValidTransition`, and only then execute the `UPDATE`.
+
+#### Observability & Telemetry
+- Added a new Prometheus metric: `jobTransitionsTotal = registry.counter({ name: "stratum_job_transitions_total" })`.
+- Added labels `from`, `to`, and `reason` to track bounded state progression frequency across the system.
+- Updated `service.js` structured logging to emit `job.transition` logs containing `fromStatus`, `toStatus`, and `reason` instead of simplistic lifecycle events, making observability state-aware.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `apps/control-plane/src/modules/jobs/state.js` | Created state machine definition |
+| `apps/control-plane/src/modules/jobs/state.test.js` | Created state machine unit tests |
+| `apps/control-plane/src/modules/jobs/repository.js` | Integrated state checks and `FOR UPDATE` reads |
+| `apps/control-plane/src/modules/jobs/service.js` | Emitted transition metrics and updated logs |
+| `apps/control-plane/src/modules/jobs/routes.js` | Mapped `INVALID_STATE_TRANSITION` to HTTP 409 |
+| `apps/control-plane/src/modules/metrics/index.js` | Added `jobTransitionsTotal` metric |
+
+### Tests
+
+```
+packages/tracing (index.test.js)   7/7 ✅
+packages/metrics (index.test.js)   4/4 ✅
+control-plane tests               31/31 ✅ (Including 13 new state machine tests)
+worker tests                       7/7 ✅
+cli tests                         25/25 ✅
+
+TOTAL                             74/74 ✅
+```
+
+### Integration Test Results
+
+Manually verified all lifecycle transitions end-to-end:
+1. **Normal Flow**: Submitted a job, worker claimed it, worker successfully completed it (`queued` -> `running` -> `succeeded`).
+2. **Immediate Cancellation**: Submitted a queued job and immediately cancelled it. Validated atomic transition `queued` -> `cancelled`.
+3. **Running Cancellation**: Submitted a long-running job, allowed worker to claim it (`queued` -> `running`). Requested cancellation. Worker detected request and gracefully acknowledged it (`running` -> `cancelled`). Control plane perfectly enforced state rules and metrics observed all paths.
+4. **Reclamation**: Force-stopped a worker mid-execution. Control plane successfully reclaimed the job (`running` -> `queued`) using the state-machine-approved transition.
+
+### Next Steps
+
+- Webhooks / Event Subscriptions
+- AI Diagnostics Prototype
+- Policy / Authorization Engine
+- Self-Healing Operations
+
+---
+
+## Milestone: User Documentation UX Redesign
+
+**Date:** 2026-10-02
+
+### Objective
+Redesign `docs/HOW_TO_USE_STRATUM.md` as a premium, extremely user-friendly product documentation page targeted at first-time users, prioritizing documentation UX over deep technical details.
+
+### What Was Built
+- Rewrote the entire user guide to be scannable, visually clean, and beginner-friendly.
+- Added a "Your first 5 minutes" quick start section.
+- Added clear, simple ASCII architecture and lifecycle diagrams.
+- Grouped instructions logically (Prerequisites → Install → Environment → Start → Submit Job → Monitor → Troubleshoot).
+- Replaced technical jargon with plain English (e.g., changed "Self-Healing" to "automatic job reclamation and retry" to accurately reflect the currently implemented system without overpromising future features).
+- Added a Troubleshooting matrix and Common Commands cheat sheet.
+
+### Verification Performed
+- Validated all `.env` variables against the current repository state.
+- Checked that database migration and script start commands precisely match `package.json`.
+- Confirmed CLI syntax, job types (`echo` and `sleep`), `/health`, and `/metrics` APIs match the live endpoints.
+
+### Files Changed
+- `docs/HOW_TO_USE_STRATUM.md`
+- `README.md` (Added direct link to user guide)
+
+### Next Steps
+- Webhooks / Event Subscriptions
+- AI Diagnostics Prototype
+- Policy / Authorization Engine
