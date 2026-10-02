@@ -22,20 +22,15 @@ async function request(path, options = {}) {
     }, config.REQUEST_TIMEOUT_MS);
 
     try {
-      const response = await fetch(
-        `${config.CONTROL_PLANE_URL}${path}`,
-        {
-          ...options,
-          signal: controller.signal,
-          headers: {
-            "traceparent": span.getTraceparent(),
-            ...(options.body
-              ? { "content-type": "application/json" }
-              : {}),
-            ...(options.headers ?? {}),
-          },
+      const response = await fetch(`${config.CONTROL_PLANE_URL}${path}`, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          traceparent: span.getTraceparent(),
+          ...(options.body ? { "content-type": "application/json" } : {}),
+          ...(options.headers ?? {}),
         },
-      );
+      });
 
       const text = await response.text();
 
@@ -51,8 +46,7 @@ async function request(path, options = {}) {
 
       if (!response.ok) {
         throw new ApiError(
-          body?.error ??
-            `Request failed with status ${response.status}`,
+          body?.error ?? `Request failed with status ${response.status}`,
           {
             status: response.status,
             body,
@@ -106,18 +100,13 @@ export function createClient() {
     },
 
     async getJob(jobId) {
-      return request(
-        `/jobs/${encodeURIComponent(jobId)}`,
-      );
+      return request(`/jobs/${encodeURIComponent(jobId)}`);
     },
 
     async cancelJob(jobId) {
-      return request(
-        `/jobs/${encodeURIComponent(jobId)}/cancel`,
-        {
-          method: "POST",
-        },
-      );
+      return request(`/jobs/${encodeURIComponent(jobId)}/cancel`, {
+        method: "POST",
+      });
     },
 
     async getNodes() {
@@ -128,6 +117,6 @@ export function createClient() {
       return request("/health");
     },
 
-    baseUrl: config.CONTROL_PLANE_URL
+    baseUrl: config.CONTROL_PLANE_URL,
   };
 }

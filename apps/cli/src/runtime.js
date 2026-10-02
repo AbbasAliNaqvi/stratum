@@ -1,12 +1,38 @@
 import { spawn } from "node:child_process";
 import { resolve, join, dirname } from "node:path";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, openSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  rmSync,
+  openSync,
+} from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, "../../..");
 const RUN_DIR = join(PROJECT_ROOT, ".stratum", "run");
 const LOG_DIR = join(PROJECT_ROOT, ".stratum", "logs");
+
+export function checkNodeVersion(versions = process.versions) {
+  const pkgPath = join(PROJECT_ROOT, "package.json");
+  if (!existsSync(pkgPath)) return true;
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  const req = pkg.engines?.node; // e.g. ">=22"
+  const match = req?.match(/>=(\d+)/);
+  if (match) {
+    const requiredMajor = parseInt(match[1], 10);
+    const currentMajor = parseInt(versions.node.split(".")[0], 10);
+    if (currentMajor < requiredMajor) {
+      console.error(
+        `✗ Node.js\n\nStratum requires Node.js ${requiredMajor} or newer.\nDetected: v${versions.node}\n\nPlease install/use Node.js ${requiredMajor}+ and run the command again.\n`,
+      );
+      return false;
+    }
+  }
+  return true;
+}
 
 export function initRuntimeDir() {
   if (!existsSync(RUN_DIR)) {

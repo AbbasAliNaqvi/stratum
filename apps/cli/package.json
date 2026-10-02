@@ -12,6 +12,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
-    "@stratum/tracing": "*"
+    "@stratum/tracing": "*",
+    "pg": "^8.23.1"
   }
 }

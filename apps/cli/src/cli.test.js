@@ -1,11 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createProgram } from "./program.js";
 
@@ -72,9 +65,7 @@ async function run(client, args) {
       writeErr: (str) => output.stderr.push(str),
     });
 
-    await program.parseAsync(
-      ["node", "stratum", ...args],
-    );
+    await program.parseAsync(["node", "stratum", ...args]);
 
     return {
       exitCode: process.exitCode ?? 0,
@@ -86,10 +77,7 @@ async function run(client, args) {
      * Commander throws CommanderError for --help
      * and --version with exitCode 0.
      */
-    const exitCode =
-      error.exitCode === 0
-        ? 0
-        : process.exitCode || 1;
+    const exitCode = error.exitCode === 0 ? 0 : process.exitCode || 1;
 
     return {
       exitCode,
@@ -101,7 +89,6 @@ async function run(client, args) {
     output.restore();
   }
 }
-
 
 describe("stratum cli", () => {
   afterEach(() => {
@@ -249,13 +236,7 @@ describe("stratum cli", () => {
 
       client.submitJob.mockResolvedValueOnce(mockResponse);
 
-      const result = await run(client, [
-        "job",
-        "run",
-        "-t",
-        "echo",
-        "--json",
-      ]);
+      const result = await run(client, ["job", "run", "-t", "echo", "--json"]);
 
       expect(result.exitCode).toBe(0);
 
@@ -298,16 +279,9 @@ describe("stratum cli", () => {
     it("handles API error on run", async () => {
       const client = createMockClient();
 
-      client.submitJob.mockRejectedValueOnce(
-        new Error("Connection refused"),
-      );
+      client.submitJob.mockRejectedValueOnce(new Error("Connection refused"));
 
-      const result = await run(client, [
-        "job",
-        "run",
-        "-t",
-        "echo",
-      ]);
+      const result = await run(client, ["job", "run", "-t", "echo"]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("Connection refused");
@@ -339,10 +313,7 @@ describe("stratum cli", () => {
         ],
       });
 
-      const result = await run(client, [
-        "job",
-        "list",
-      ]);
+      const result = await run(client, ["job", "list"]);
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("aaa-111");
@@ -357,12 +328,7 @@ describe("stratum cli", () => {
         jobs: [],
       });
 
-      await run(client, [
-        "job",
-        "list",
-        "-s",
-        "queued",
-      ]);
+      await run(client, ["job", "list", "-s", "queued"]);
 
       expect(client.listJobs).toHaveBeenCalledWith({
         status: "queued",
@@ -377,12 +343,7 @@ describe("stratum cli", () => {
         jobs: [],
       });
 
-      await run(client, [
-        "job",
-        "list",
-        "-t",
-        "echo",
-      ]);
+      await run(client, ["job", "list", "-t", "echo"]);
 
       expect(client.listJobs).toHaveBeenCalledWith({
         status: undefined,
@@ -397,10 +358,7 @@ describe("stratum cli", () => {
         jobs: [],
       });
 
-      const result = await run(client, [
-        "job",
-        "list",
-      ]);
+      const result = await run(client, ["job", "list"]);
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("No jobs found");
@@ -422,11 +380,7 @@ describe("stratum cli", () => {
 
       client.listJobs.mockResolvedValueOnce(mockResponse);
 
-      const result = await run(client, [
-        "job",
-        "list",
-        "--json",
-      ]);
+      const result = await run(client, ["job", "list", "--json"]);
 
       expect(result.exitCode).toBe(0);
 
@@ -437,14 +391,9 @@ describe("stratum cli", () => {
     it("handles API error on list", async () => {
       const client = createMockClient();
 
-      client.listJobs.mockRejectedValueOnce(
-        new Error("Network error"),
-      );
+      client.listJobs.mockRejectedValueOnce(new Error("Network error"));
 
-      const result = await run(client, [
-        "job",
-        "list",
-      ]);
+      const result = await run(client, ["job", "list"]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("Network error");
@@ -488,11 +437,7 @@ describe("stratum cli", () => {
         ],
       });
 
-      const result = await run(client, [
-        "job",
-        "inspect",
-        "abc-123",
-      ]);
+      const result = await run(client, ["job", "inspect", "abc-123"]);
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("abc-123");
@@ -520,12 +465,7 @@ describe("stratum cli", () => {
 
       client.getJob.mockResolvedValueOnce(mockResponse);
 
-      const result = await run(client, [
-        "job",
-        "inspect",
-        "abc-123",
-        "--json",
-      ]);
+      const result = await run(client, ["job", "inspect", "abc-123", "--json"]);
 
       expect(result.exitCode).toBe(0);
 
@@ -541,11 +481,7 @@ describe("stratum cli", () => {
 
       client.getJob.mockRejectedValueOnce(error);
 
-      const result = await run(client, [
-        "job",
-        "inspect",
-        "nonexistent",
-      ]);
+      const result = await run(client, ["job", "inspect", "nonexistent"]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("not found");
@@ -554,15 +490,9 @@ describe("stratum cli", () => {
     it("handles API error on inspect", async () => {
       const client = createMockClient();
 
-      client.getJob.mockRejectedValueOnce(
-        new Error("Server error"),
-      );
+      client.getJob.mockRejectedValueOnce(new Error("Server error"));
 
-      const result = await run(client, [
-        "job",
-        "inspect",
-        "abc-123",
-      ]);
+      const result = await run(client, ["job", "inspect", "abc-123"]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("Server error");
@@ -587,11 +517,7 @@ describe("stratum cli", () => {
         },
       });
 
-      const result = await run(client, [
-        "job",
-        "cancel",
-        "abc-123",
-      ]);
+      const result = await run(client, ["job", "cancel", "abc-123"]);
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("abc-123");
@@ -612,11 +538,7 @@ describe("stratum cli", () => {
         },
       });
 
-      const result = await run(client, [
-        "job",
-        "cancel",
-        "abc-123",
-      ]);
+      const result = await run(client, ["job", "cancel", "abc-123"]);
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("running");
@@ -637,12 +559,7 @@ describe("stratum cli", () => {
 
       client.cancelJob.mockResolvedValueOnce(mockResponse);
 
-      const result = await run(client, [
-        "job",
-        "cancel",
-        "abc-123",
-        "--json",
-      ]);
+      const result = await run(client, ["job", "cancel", "abc-123", "--json"]);
 
       expect(result.exitCode).toBe(0);
 
@@ -658,11 +575,7 @@ describe("stratum cli", () => {
 
       client.cancelJob.mockRejectedValueOnce(error);
 
-      const result = await run(client, [
-        "job",
-        "cancel",
-        "nonexistent",
-      ]);
+      const result = await run(client, ["job", "cancel", "nonexistent"]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("not found");
@@ -677,11 +590,7 @@ describe("stratum cli", () => {
 
       client.cancelJob.mockRejectedValueOnce(error);
 
-      const result = await run(client, [
-        "job",
-        "cancel",
-        "abc-123",
-      ]);
+      const result = await run(client, ["job", "cancel", "abc-123"]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("JOB_ALREADY_SUCCEEDED");
@@ -690,15 +599,9 @@ describe("stratum cli", () => {
     it("handles network error on cancel", async () => {
       const client = createMockClient();
 
-      client.cancelJob.mockRejectedValueOnce(
-        new Error("ECONNREFUSED"),
-      );
+      client.cancelJob.mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
-      const result = await run(client, [
-        "job",
-        "cancel",
-        "abc-123",
-      ]);
+      const result = await run(client, ["job", "cancel", "abc-123"]);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("ECONNREFUSED");

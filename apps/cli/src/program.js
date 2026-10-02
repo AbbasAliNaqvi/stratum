@@ -12,9 +12,7 @@ export function createProgram({ client } = {}) {
 
   program
     .name("stratum")
-    .description(
-      "Stratum CLI — distributed backend control plane",
-    )
+    .description("Stratum CLI — distributed backend control plane")
     .version("0.1.0");
 
   program.action(async () => {

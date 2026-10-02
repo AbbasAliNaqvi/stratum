@@ -1,74 +1,228 @@
 import { Command } from "commander";
-import { startService, stopService, isServiceRunning, getProjectRoot, getLogDir, initRuntimeDir } from "../runtime.js";
+import {
+  startService,
+  stopService,
+  isServiceRunning,
+  getProjectRoot,
+  getLogDir,
+  initRuntimeDir,
+} from "../runtime.js";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import pg from "pg";
 
-function printStatus(json) {
-  const cpRunning = isServiceRunning("control-plane");
-  const workerRunning = isServiceRunning("worker");
-
-  if (json) {
-    console.log(JSON.stringify({
-      controlPlane: !!cpRunning,
-      worker: !!workerRunning,
-    }, null, 2));
-    return;
+async function ensureDatabase(dbUrl) {
+  const url = new URL(dbUrl);
+  const targetDb = url.pathname.slice(1);
+  if (!targetDb) {
+    throw new Error("Invalid DATABASE_URL: missing database name");
   }
 
-  console.log("\nStratum\n");
-  console.log(`Control Plane   ${cpRunning ? "● Running" : "○ Stopped"}`);
-  console.log(`Worker          ${workerRunning ? "● Running" : "○ Stopped"}`);
-  console.log("");
+  const targetClient = new pg.Client({ connectionString: dbUrl });
+  try {
+    await targetClient.connect();
+    await targetClient.end();
+    return;
+  } catch (err) {
+    if (err.code !== "3D000") {
+      throw err;
+    }
+  }
+
+  url.pathname = "/postgres";
+  const maintDbUrl = url.toString();
+
+  const maintClient = new pg.Client({ connectionString: maintDbUrl });
+  try {
+    await maintClient.connect();
+  } catch (err) {
+    throw new Error(
+      `Failed to connect to maintenance database: ${err.message}`,
+    );
+  }
+
+  try {
+    const escapedDbName = targetDb.replace(/"/g, '""');
+    await maintClient.query(`CREATE DATABASE "${escapedDbName}"`);
+  } catch (err) {
+    await maintClient.end();
+    throw new Error(`Could not create database "${targetDb}": ${err.message}`);
+  }
+
+  await maintClient.end();
+}
+
+async function waitForControlPlane(client) {
+  const max = process.env.NODE_ENV === "test" ? 1 : 30;
+  const delay = process.env.NODE_ENV === "test" ? 0 : 1000;
+  for (let i = 0; i < max; i++) {
+    try {
+      await client.getHealth();
+      return true;
+    } catch {
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  return false;
+}
+
+async function waitForWorker(client) {
+  const max = process.env.NODE_ENV === "test" ? 1 : 30;
+  const delay = process.env.NODE_ENV === "test" ? 0 : 1000;
+  for (let i = 0; i < max; i++) {
+    try {
+      const nodes = await client.getNodes();
+      if (nodes.nodes && nodes.nodes.some((n) => n.status === "active")) {
+        return true;
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  return false;
+}
+
+export async function getSystemHealth(client) {
+  const cpPid = isServiceRunning("control-plane");
+  const workerPid = isServiceRunning("worker");
+
+  let cpReachable = false;
+  let activeWorkers = 0;
+
+  if (cpPid) {
+    try {
+      await client.getHealth();
+      cpReachable = true;
+      const nodes = await client.getNodes();
+      activeWorkers =
+        nodes.nodes?.filter((n) => n.status === "active").length || 0;
+    } catch {}
+  }
+
+  return { cpPid, workerPid, cpReachable, activeWorkers };
 }
 
 export function registerLifecycleCommands(program, { client }) {
   program
     .command("init")
     .description("Initialize Stratum environment and database")
-    .action(() => {
-      console.log("Stratum Initialization");
+    .action(async () => {
+      console.log("Stratum\n");
+      console.log("✓ Node.js");
 
-      console.log("\n✓ Node.js detected");
-
-      try {
-        execSync("psql --version", { stdio: "ignore" });
-        console.log("✓ PostgreSQL detected");
-      } catch {
-        console.log("✗ PostgreSQL not detected in PATH. (Make sure it is installed and running if using localhost)");
+      const envPath = join(getProjectRoot(), ".env");
+      if (!existsSync(envPath)) {
+        writeFileSync(
+          envPath,
+          "DATABASE_URL=postgres://postgres:postgres@localhost:5432/stratum\nSTRATUM_CONTROL_PLANE_URL=http://127.0.0.1:3000\n",
+        );
+        process.env.DATABASE_URL =
+          "postgres://postgres:postgres@localhost:5432/stratum";
+        process.env.STRATUM_CONTROL_PLANE_URL = "http://127.0.0.1:3000";
       }
 
-      console.log("✓ Dependencies ready");
+      if (!process.env.DATABASE_URL) {
+        console.log("✗ PostgreSQL / Database");
+        console.error("\nNo DATABASE_URL found in .env");
+        process.exitCode = 1;
+        return;
+      }
 
       try {
-        console.log("\nApplying database migrations...");
-        execSync("npm run db:migrate", { cwd: getProjectRoot(), stdio: "inherit" });
-        console.log("✓ Database ready");
-        console.log("✓ Migrations applied");
+        await ensureDatabase(process.env.DATABASE_URL);
+        console.log("✓ PostgreSQL");
+        console.log("✓ Database");
       } catch (err) {
-        console.error("\n✗ Failed to apply migrations. Please ensure PostgreSQL is running and DATABASE_URL is correct in .env");
+        console.log("✗ Database");
+        console.log(
+          `\nPostgreSQL is reachable, but Stratum could not create the\nlocal database "${new URL(process.env.DATABASE_URL).pathname.slice(1)}".\n\nError: ${err.message}\n\nPlease either:\n  1. provide a DATABASE_URL for an accessible PostgreSQL database, or\n  2. create the database manually and run \`stratum init\` again.\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      try {
+        execSync("npm run db:migrate", {
+          cwd: getProjectRoot(),
+          stdio: "ignore",
+        });
+        console.log("✓ Schema");
+      } catch (err) {
+        console.log("✗ Schema");
+        console.error("\nFailed to apply database migrations.");
         process.exitCode = 1;
         return;
       }
 
       initRuntimeDir();
-      startService("control-plane", "npm", ["run", "dev", "--workspace=@stratum/control-plane"]);
-      console.log("✓ Control Plane started");
+      startService("control-plane", "npm", [
+        "run",
+        "dev",
+        "--workspace=@stratum/control-plane",
+      ]);
 
-      startService("worker", "npm", ["run", "dev", "--workspace=@stratum/worker"]);
-      console.log("✓ Worker connected");
+      const cpReady = await waitForControlPlane(client);
+      if (!cpReady) {
+        console.log("✗ Control Plane");
+        console.error(
+          "\nThe Control Plane process started, but the API did not become reachable.\nCheck:\n  stratum logs\n  stratum doctor",
+        );
+        process.exitCode = 1;
+        return;
+      }
+      console.log("✓ Control Plane");
 
-      console.log("✓ System ready");
-      console.log("\nStratum is ready.\n\nRun:\n\n  stratum\n\nto open the control panel.\n");
+      startService("worker", "npm", [
+        "run",
+        "dev",
+        "--workspace=@stratum/worker",
+      ]);
+
+      const workerReady = await waitForWorker(client);
+      if (!workerReady) {
+        console.log("✗ Worker");
+        console.error(
+          "\nThe Worker process started, but did not register with Stratum.\n\nCheck:\n\n  stratum logs\n  stratum doctor\n",
+        );
+        process.exitCode = 1;
+        return;
+      }
+      console.log("✓ Worker");
+
+      console.log(
+        "\nStratum is ready.\n\nRun:\n\n  stratum\n\nto open the control panel.\n",
+      );
     });
 
   program
     .command("start")
     .description("Start Stratum background services")
-    .action(() => {
+    .action(async () => {
       initRuntimeDir();
-      startService("control-plane", "npm", ["run", "dev", "--workspace=@stratum/control-plane"]);
-      startService("worker", "npm", ["run", "dev", "--workspace=@stratum/worker"]);
+      startService("control-plane", "npm", [
+        "run",
+        "dev",
+        "--workspace=@stratum/control-plane",
+      ]);
+      const cpReady = await waitForControlPlane(client);
+      if (!cpReady) {
+        console.error("✗ Control Plane failed to become reachable.");
+        process.exitCode = 1;
+        return;
+      }
+
+      startService("worker", "npm", [
+        "run",
+        "dev",
+        "--workspace=@stratum/worker",
+      ]);
+      const workerReady = await waitForWorker(client);
+      if (!workerReady) {
+        console.error("✗ Worker failed to register.");
+        process.exitCode = 1;
+        return;
+      }
+
       console.log("Stratum services started.");
     });
 
@@ -85,11 +239,33 @@ export function registerLifecycleCommands(program, { client }) {
   program
     .command("restart")
     .description("Restart Stratum background services")
-    .action(() => {
+    .action(async () => {
       stopService("control-plane");
       stopService("worker");
-      startService("control-plane", "npm", ["run", "dev", "--workspace=@stratum/control-plane"]);
-      startService("worker", "npm", ["run", "dev", "--workspace=@stratum/worker"]);
+
+      startService("control-plane", "npm", [
+        "run",
+        "dev",
+        "--workspace=@stratum/control-plane",
+      ]);
+      const cpReady = await waitForControlPlane(client);
+      if (!cpReady) {
+        console.error("✗ Control Plane failed to become reachable.");
+        process.exitCode = 1;
+        return;
+      }
+
+      startService("worker", "npm", [
+        "run",
+        "dev",
+        "--workspace=@stratum/worker",
+      ]);
+      const workerReady = await waitForWorker(client);
+      if (!workerReady) {
+        console.error("✗ Worker failed to register.");
+        process.exitCode = 1;
+        return;
+      }
       console.log("Stratum services restarted.");
     });
 
@@ -98,44 +274,47 @@ export function registerLifecycleCommands(program, { client }) {
     .description("Show system status")
     .option("--json", "Output as JSON")
     .action(async (options) => {
-      if (!isServiceRunning("control-plane")) {
-        printStatus(options.json);
+      const health = await getSystemHealth(client);
+
+      if (options.json) {
+        console.log(
+          JSON.stringify(
+            {
+              controlPlane: health.cpReachable,
+              database: health.cpReachable,
+              workers: health.activeWorkers,
+            },
+            null,
+            2,
+          ),
+        );
         return;
       }
 
-      try {
-        // Try to fetch real metrics if possible
-        const nodesRes = await fetch(`${client.baseUrl}/nodes`);
-        const nodes = await nodesRes.json();
+      console.log("\nStratum\n");
+      console.log(
+        `Control Plane   ${health.cpReachable ? "● Running" : "○ Stopped/Unreachable"}`,
+      );
 
-        const jobsRes = await client.listJobs();
-        const jobs = jobsRes.jobs || [];
-
-        const queued = jobs.filter(j => j.status === "queued").length;
-        const running = jobs.filter(j => j.status === "running").length;
-        const failed = jobs.filter(j => j.status === "failed").length;
-
-        if (options.json) {
-          console.log(JSON.stringify({
-            controlPlane: true,
-            database: true,
-            workers: nodes.nodes.filter(n => n.status === "active").length,
-            queue: { queued, running, failed }
-          }, null, 2));
-          return;
-        }
-
-        console.log("\nStratum\n");
-        console.log(`Control Plane   ● Running`);
+      if (health.cpReachable) {
         console.log(`Database        ● Connected`);
-        console.log(`Workers         ● ${nodes.nodes.filter(n => n.status === "active").length} online`);
-        console.log(`Queue           ${queued} queued`);
-        console.log(`Running         ${running}`);
-        console.log(`Failed          ${failed}`);
-        console.log(`\nURL             ${client.baseUrl}\n`);
-      } catch (e) {
-        printStatus(options.json);
+        console.log(`Workers         ${health.activeWorkers} online`);
+
+        try {
+          const jobsRes = await client.listJobs();
+          const jobs = jobsRes.jobs || [];
+          const queued = jobs.filter((j) => j.status === "queued").length;
+          const running = jobs.filter((j) => j.status === "running").length;
+          const failed = jobs.filter((j) => j.status === "failed").length;
+
+          console.log(`Queue           ${queued} queued`);
+          console.log(`Running         ${running}`);
+          console.log(`Failed          ${failed}`);
+        } catch {}
+      } else {
+        console.log(`Workers         0 online`);
       }
+      console.log(`\nURL             ${client.baseUrl}\n`);
     });
 
   program
@@ -146,35 +325,58 @@ export function registerLifecycleCommands(program, { client }) {
       console.log("✓ Node.js");
 
       try {
-        execSync("psql --version", { stdio: "ignore" });
+        const url = new URL(
+          process.env.DATABASE_URL ||
+            "postgres://postgres:postgres@localhost:5432/stratum",
+        );
+        url.pathname = "/postgres";
+        const maintClient = new pg.Client({ connectionString: url.toString() });
+        await maintClient.connect();
+        await maintClient.end();
         console.log("✓ PostgreSQL");
-      } catch {
-        console.log("✗ PostgreSQL");
-        console.log("\nPostgreSQL is not reachable. Start PostgreSQL and run:\n\n  stratum init\n");
-        return;
+
+        const targetClient = new pg.Client({
+          connectionString:
+            process.env.DATABASE_URL ||
+            "postgres://postgres:postgres@localhost:5432/stratum",
+        });
+        await targetClient.connect();
+        await targetClient.end();
+        console.log("✓ Database");
+      } catch (err) {
+        if (err.code === "3D000") {
+          console.log("✓ PostgreSQL");
+          console.log(
+            `✗ Database (Database "${new URL(process.env.DATABASE_URL).pathname.slice(1)}" does not exist. Run: stratum init)`,
+          );
+        } else {
+          console.log("✗ PostgreSQL (Not reachable)");
+          console.log("✗ Database");
+        }
       }
 
-      const cpRunning = isServiceRunning("control-plane");
-      if (cpRunning) {
+      try {
+        execSync("npm run db:migrate", {
+          cwd: getProjectRoot(),
+          stdio: "ignore",
+        });
+        console.log("✓ Schema");
+      } catch {
+        console.log("✗ Schema (Migrations failed or incomplete)");
+      }
+
+      const health = await getSystemHealth(client);
+
+      if (health.cpReachable) {
         console.log("✓ Control Plane");
       } else {
-        console.log("✗ Control Plane (Not running)");
+        console.log("✗ Control Plane (Not reachable via API)");
       }
 
-      const workerRunning = isServiceRunning("worker");
-      if (workerRunning) {
+      if (health.activeWorkers > 0) {
         console.log("✓ Worker");
       } else {
-        console.log("✗ Worker (Not running)");
-      }
-
-      if (cpRunning) {
-        try {
-          await fetch(`${client.baseUrl}/health`);
-          console.log("✓ API connectivity");
-        } catch {
-          console.log("✗ API connectivity (Cannot reach Control Plane API)");
-        }
+        console.log("✗ Worker (Not registered)");
       }
     });
 
@@ -185,7 +387,9 @@ export function registerLifecycleCommands(program, { client }) {
       console.log("--- Control Plane Logs ---");
       const cpLog = join(getLogDir(), "control-plane.log");
       if (existsSync(cpLog)) {
-        console.log(execSync(`tail -n 20 "${cpLog}"`).toString());
+        try {
+          console.log(execSync(`tail -n 20 "${cpLog}"`).toString());
+        } catch {}
       } else {
         console.log("No logs yet.");
       }
@@ -193,7 +397,9 @@ export function registerLifecycleCommands(program, { client }) {
       console.log("\n--- Worker Logs ---");
       const workerLog = join(getLogDir(), "worker.log");
       if (existsSync(workerLog)) {
-        console.log(execSync(`tail -n 20 "${workerLog}"`).toString());
+        try {
+          console.log(execSync(`tail -n 20 "${workerLog}"`).toString());
+        } catch {}
       } else {
         console.log("No logs yet.");
       }
@@ -204,31 +410,40 @@ export function registerLifecycleCommands(program, { client }) {
     .description("List active workers")
     .option("--json", "Output as JSON")
     .action(async (options) => {
-      try {
-        const res = await fetch(`${client.baseUrl}/nodes`);
-        const data = await res.json();
+      const health = await getSystemHealth(client);
 
-        if (options.json) {
-          console.log(JSON.stringify(data.nodes, null, 2));
-          return;
-        }
-
-        console.log("\nWorkers\n");
-        console.log("ID".padEnd(30) + "Status".padEnd(10) + "Last Heartbeat");
-        for (const node of data.nodes) {
-          console.log(
-            node.nodeId.padEnd(30) +
-            node.status.padEnd(10) +
-            new Date(node.lastHeartbeat).toISOString()
-          );
-        }
-        console.log("");
-      } catch (e) {
+      if (!health.cpReachable) {
         if (options.json) {
           console.log(JSON.stringify({ error: "Cannot reach Control Plane" }));
         } else {
           console.error("Cannot reach Control Plane to list workers.");
         }
+        process.exitCode = 1;
+        return;
+      }
+
+      try {
+        const res = await client.getNodes();
+
+        if (options.json) {
+          console.log(JSON.stringify(res.nodes, null, 2));
+          return;
+        }
+
+        console.log(`\nWorkers: ${health.activeWorkers} online\n`);
+        if (res.nodes && res.nodes.length > 0) {
+          console.log("ID".padEnd(30) + "Status".padEnd(10) + "Last Heartbeat");
+          for (const node of res.nodes) {
+            console.log(
+              node.nodeId.padEnd(30) +
+                node.status.padEnd(10) +
+                new Date(node.lastHeartbeat).toISOString(),
+            );
+          }
+        }
+        console.log("");
+      } catch (e) {
+        console.error("Error fetching workers", e.message);
         process.exitCode = 1;
       }
     });

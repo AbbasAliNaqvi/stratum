@@ -18,13 +18,46 @@ npm install
 npm link
 stratum init
 ```
-*(This automatically connects to PostgreSQL, runs migrations, and starts the background Control Plane and Worker processes.)*
+*(This command will:
+1. Verify you are running Node 22+.
+2. Check for a local `.env` and create one with safe defaults if missing (targeting a local `stratum` PostgreSQL database).
+3. Safely auto-provision the `stratum` PostgreSQL database if it is missing (without dropping existing databases).
+4. Apply database migrations to the target database, preserving any existing data.
+5. Start the background Control Plane and wait for it to become reachable.
+6. Start the Worker and wait for it to register to the Control Plane.)*
 
 **3. Open Stratum**
 ```bash
 stratum
 ```
-*(This opens the unified control panel where you can run jobs and monitor the system.)*
+This opens the **Stratum Console** — a persistent interactive terminal where you type slash commands to manage distributed work.
+
+```text
+╭────────────────────────────────────────────────────────╮
+│ STRATUM                                                │
+│ Distributed Work Control Console                       │
+│                                                        │
+│ ● healthy  ·  1 worker  ·  0 queued  ·  0 running     │
+╰────────────────────────────────────────────────────────╯
+
+  Type /help for commands, /work to run work
+
+›
+```
+
+**4. Your first commands**
+```text
+› /help              Show available commands
+› /work              Submit a job interactively
+› /jobs              View recent jobs
+› /status            System health overview
+› /workers           See active workers
+› /doctor            Diagnose problems
+› /config            View runtime configuration
+› /model             AI model configuration (future)
+› /clear             Clear screen
+› /quit              Exit
+```
 
 ---
 
@@ -245,14 +278,34 @@ Tracing lets you follow one job across the CLI, Control Plane, and Worker. When 
 
 ## Common Commands
 
+### Interactive Console (inside `stratum`)
+
+| Command | Description |
+| ------- | ----------- |
+| `/work` | Submit work interactively |
+| `/jobs` | Browse recent jobs |
+| `/jobs running` | Filter jobs by status |
+| `/workers` | View active workers |
+| `/status` | System health overview |
+| `/logs` | View recent activity |
+| `/doctor` | Diagnose problems |
+| `/model` | AI model configuration |
+| `/config` | Runtime configuration |
+| `/help` | Show commands |
+| `/clear` | Clear screen |
+| `/quit` | Exit |
+
+### Direct CLI (automation-friendly)
+
 | Task | Command |
 | ---- | ------- |
 | **Initialize system** | `stratum init` |
-| **Open control panel** | `stratum` |
-| **Start background services** | `stratum start` |
-| **Stop background services** | `stratum stop` |
+| **Open console** | `stratum` |
+| **Start services** | `stratum start` |
+| **Stop services** | `stratum stop` |
 | **System status** | `stratum status` |
 | **View logs** | `stratum logs` |
 | **Run diagnostics** | `stratum doctor` |
-| **Run job directly** | `stratum job run -t echo` |
+| **Run job** | `stratum job run -t echo` |
 | **Cancel job** | `stratum job cancel <ID>` |
+| **JSON output** | `stratum job list --json` |

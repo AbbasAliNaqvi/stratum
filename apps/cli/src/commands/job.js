@@ -9,9 +9,7 @@ import {
 } from "../output.js";
 
 export function registerJobCommands(program, { client }) {
-  const job = program
-    .command("job")
-    .description("Manage jobs");
+  const job = program.command("job").description("Manage jobs");
 
   /*
    * stratum job run
@@ -178,9 +176,7 @@ export function registerJobCommands(program, { client }) {
 
         const status = result.job?.status ?? "unknown";
 
-        console.log(
-          `\n  Job ${id} — ${status}\n`,
-        );
+        console.log(`\n  Job ${id} — ${status}\n`);
       } catch (error) {
         if (error.status === 404) {
           printError(`Job not found: ${id}`, {
@@ -193,8 +189,7 @@ export function registerJobCommands(program, { client }) {
 
         if (error.status === 409) {
           printError(
-            error.body?.error ??
-              "Job cannot be cancelled in its current state",
+            error.body?.error ?? "Job cannot be cancelled in its current state",
             { json: options.json },
           );
 

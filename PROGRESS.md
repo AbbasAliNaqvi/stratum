@@ -551,3 +551,62 @@ stratum
 ### Next Steps
 - Webhooks / Event Subscriptions
 - AI Diagnostics Prototype
+
+---
+
+## Milestone: Stratum Interactive Console UX v2
+
+**Date:** 2026-10-02
+
+### Objective
+Redesign the interactive Stratum terminal from a numbered admin menu into a modern developer-oriented slash-command console inspired by contemporary interactive CLIs. The goal is to make Stratum feel like a real distributed work control product, not a basic job scheduler.
+
+### Design Decisions
+- **Eliminated the numbered menu**: The old `1 Run Job / 2 Jobs / 3 Workers / ...` navigation was replaced with a persistent input prompt (`›`) and a slash-command system.
+- **Slash command architecture**: All interactive operations use a central command registry (`/work`, `/jobs`, `/workers`, `/status`, `/logs`, `/doctor`, `/model`, `/config`, `/help`, `/clear`, `/quit`) with aliases and tab-completion.
+- **Shared UI primitives layer**: Created `apps/cli/src/ui.js` — a dedicated output module providing box-drawing, tables, key-value panels, status icons, spinners, colour helpers, and ANSI-safe formatting. Every visual element in the CLI renders through this layer.
+- **Interactive selection menus**: `/work` uses arrow-key navigation with raw-mode stdin to let users select workload types without typing numbers.
+- **Command history**: The readline-based REPL supports ↑/↓ history navigation within the session.
+- **Box-drawn header**: The console opens with a compact status box showing system health, worker count, and queue metrics at a glance.
+- **Terminal robustness**: Ctrl+C returns to prompt (does not crash), Ctrl+D exits cleanly, Escape cancels interactive selections, and raw mode is always properly restored on exit.
+- **Product terminology**: User-facing language emphasizes "work", "workers", "runtime", "system" rather than "job scheduler" and "queue administration".
+- **`/model` foundation**: Added as a truthful configuration surface for the future AI Diagnostics milestone. Currently shows `No AI model configured` with environment variable documentation. Does NOT fake AI functionality.
+
+### What Was Built
+- `apps/cli/src/ui.js` — Shared UI primitives (colours, box drawing, tables, key-value panels, spinners, status icons, time formatting)
+- `apps/cli/src/interactive.js` — Complete rewrite: persistent REPL console with slash commands, autocomplete, command history, arrow-key selection, and polished output
+- `apps/cli/src/ui.test.js` — 14 tests for UI primitives
+
+### Slash Commands Implemented
+| Command | Description |
+| ------- | ----------- |
+| `/work` | Interactive workload submission with arrow-key type selection |
+| `/jobs [filter]` | Browse jobs with optional status filter |
+| `/workers` | View registered worker nodes with heartbeat status |
+| `/status` | Full system health overview using centralized health abstraction |
+| `/logs` | Parsed structured log viewer from service log files |
+| `/doctor` | Real diagnostic checks (Node, Control Plane, Workers) |
+| `/model` | AI model configuration surface (future-ready) |
+| `/config` | Safe runtime configuration display (no secrets) |
+| `/help [cmd]` | Contextual help with per-command detail |
+| `/clear` | Clear terminal screen |
+| `/quit` | Clean exit |
+
+### Verification Performed
+- All 52 CLI tests pass (38 existing + 14 new UI tests).
+- All 87 workspace tests pass across all workspaces.
+- Direct CLI commands (`stratum status`, `stratum doctor`, `stratum job run`) remain fully functional.
+- JSON mode (`--json`) remains operational.
+- Terminal exits cleanly without leaving stdin in raw mode.
+
+### Files Changed
+- `apps/cli/src/interactive.js` (complete rewrite)
+- `apps/cli/src/ui.js` (new)
+- `apps/cli/src/ui.test.js` (new)
+- `docs/HOW_TO_USE_STRATUM.md` (updated for slash commands)
+- `PROGRESS.md` (this entry)
+
+### Next Steps
+- Real Workloads (HTTP jobs, command execution)
+- AI Diagnostics Prototype (Groq API integration via `/model`)
+- Webhooks / Event Subscriptions

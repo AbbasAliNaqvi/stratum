@@ -19,9 +19,7 @@ export function printJson(data) {
 
 export function printError(message, { json = false } = {}) {
   if (json) {
-    console.error(
-      JSON.stringify({ error: message }),
-    );
+    console.error(JSON.stringify({ error: message }));
   } else {
     console.error(`Error: ${message}`);
   }
@@ -39,14 +37,10 @@ export function printJobSummary(job) {
   if (job.lockedBy) {
     lines.push(`  Locked By:    ${job.lockedBy}`);
     lines.push(`  Lease Token:  ${job.leaseToken}`);
-    lines.push(
-      `  Lease Expires: ${formatTimestamp(job.leaseExpiresAt)}`,
-    );
+    lines.push(`  Lease Expires: ${formatTimestamp(job.leaseExpiresAt)}`);
   }
 
-  lines.push(
-    `  Retries:      ${job.retryCount}/${job.maxRetries}`,
-  );
+  lines.push(`  Retries:      ${job.retryCount}/${job.maxRetries}`);
 
   if (job.idempotencyKey) {
     lines.push(`  Idempotency:  ${job.idempotencyKey}`);
@@ -63,9 +57,7 @@ export function printJobSummary(job) {
   }
 
   if (job.cancelRequestedAt) {
-    lines.push(
-      `  Cancel Req:   ${formatTimestamp(job.cancelRequestedAt)}`,
-    );
+    lines.push(`  Cancel Req:   ${formatTimestamp(job.cancelRequestedAt)}`);
   }
 
   if (job.result) {
@@ -114,9 +106,7 @@ export function printJobEvents(events) {
   }
 
   console.log("  Events:");
-  console.log(
-    "  ─────────────────────────────────────────────────",
-  );
+  console.log("  ─────────────────────────────────────────────────");
 
   for (const event of events) {
     const time = formatTimestamp(event.createdAt);
