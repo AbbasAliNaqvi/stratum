@@ -26,4 +26,15 @@ export async function healthRoutes(app) {
       };
     }
   });
+
+  let flakyCount = 0;
+  app.get("/health/flaky", async (request, reply) => {
+    if (flakyCount % 2 === 0) {
+      flakyCount++;
+      reply.code(500);
+      return { status: "error", message: "Simulated random failure" };
+    }
+    flakyCount++;
+    return { status: "ok" };
+  });
 }

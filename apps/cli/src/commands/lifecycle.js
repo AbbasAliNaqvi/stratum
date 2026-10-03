@@ -70,16 +70,24 @@ async function waitForControlPlane(client) {
 async function waitForWorker(client) {
   const max = process.env.NODE_ENV === "test" ? 1 : 30;
   const delay = process.env.NODE_ENV === "test" ? 0 : 1000;
+  
+  let registered = false;
+  
   for (let i = 0; i < max; i++) {
     try {
       const nodes = await client.getNodes();
-      if (nodes.nodes && nodes.nodes.some((n) => n.status === "active")) {
-        return true;
+      const node = nodes.nodes?.find((n) => n.status === "registered");
+      if (node) {
+        registered = true;
+        const healthy = Date.now() - new Date(node.lastHeartbeatAt).getTime() < 15000;
+        return { started: true, registered: true, healthy };
       }
     } catch {}
     await new Promise((r) => setTimeout(r, delay));
   }
-  return false;
+  
+  const started = isServiceRunning("worker") !== null;
+  return { started, registered, healthy: false };
 }
 
 export async function getSystemHealth(client) {
@@ -95,7 +103,7 @@ export async function getSystemHealth(client) {
       cpReachable = true;
       const nodes = await client.getNodes();
       activeWorkers =
-        nodes.nodes?.filter((n) => n.status === "active").length || 0;
+        nodes.nodes?.filter((n) => n.status === "registered").length || 0;
     } catch {}
   }
 
@@ -178,16 +186,22 @@ export function registerLifecycleCommands(program, { client }) {
         "--workspace=@stratum/worker",
       ]);
 
-      const workerReady = await waitForWorker(client);
-      if (!workerReady) {
+      const workerState = await waitForWorker(client);
+      if (!workerState.registered) {
         console.log("✗ Worker");
-        console.error(
-          "\nThe Worker process started, but did not register with Stratum.\n\nCheck:\n\n  stratum logs\n  stratum doctor\n",
-        );
+        if (!workerState.started) {
+          console.error("\nThe Worker process failed to start.\n");
+        } else {
+          console.error("\nThe Worker process started, but did not register with Stratum.\n\nCheck:\n  stratum logs\n  stratum doctor\n");
+        }
         process.exitCode = 1;
         return;
+      } else if (!workerState.healthy) {
+        console.log("⚠ Worker");
+        console.error("\nThe Worker registered but is not currently healthy (missing heartbeat).\n");
+      } else {
+        console.log("✓ Worker");
       }
-      console.log("✓ Worker");
 
       console.log(
         "\nStratum is ready.\n\nRun:\n\n  stratum\n\nto open the control panel.\n",
@@ -216,11 +230,17 @@ export function registerLifecycleCommands(program, { client }) {
         "dev",
         "--workspace=@stratum/worker",
       ]);
-      const workerReady = await waitForWorker(client);
-      if (!workerReady) {
-        console.error("✗ Worker failed to register.");
+      const workerState = await waitForWorker(client);
+      if (!workerState.registered) {
+        if (!workerState.started) {
+          console.error("✗ Worker process failed to start.");
+        } else {
+          console.error("✗ Worker process started but did not register.");
+        }
         process.exitCode = 1;
         return;
+      } else if (!workerState.healthy) {
+        console.error("⚠ Worker registered but is not healthy.");
       }
 
       console.log("Stratum services started.");

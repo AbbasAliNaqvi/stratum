@@ -204,6 +204,18 @@ describe("node liveness monitor", () => {
   });
 
   it("reclaims jobs owned by a stale node", async () => {
+    // Register the node first so it can claim jobs
+    await db.insert(nodes).values({
+      nodeId: NODE_ID,
+      hostname: "test-hostname",
+      cpuCores: 4,
+      memoryMb: 1024,
+      status: "registered",
+    }).onConflictDoUpdate({
+      target: nodes.nodeId,
+      set: { status: "registered" },
+    });
+
     const job = await createTestJob({
       retryCount: 0,
     });

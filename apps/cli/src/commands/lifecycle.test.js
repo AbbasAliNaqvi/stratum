@@ -202,7 +202,7 @@ describe("lifecycle commands", () => {
       child_process.execSync.mockReturnValue(""); // postgres ok
       runtime.isServiceRunning.mockReturnValue(1234);
       client.getHealth.mockResolvedValue();
-      client.getNodes.mockResolvedValue({ nodes: [{ status: "active" }] });
+      client.getNodes.mockResolvedValue({ nodes: [{ status: "registered" }] });
 
       const { out } = await runCommand("doctor", client);
       expect(out).toContain("✓ PostgreSQL");

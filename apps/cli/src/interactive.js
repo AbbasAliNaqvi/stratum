@@ -756,6 +756,7 @@ async function cmdWorkflow(client, rl, orchestrator) {
 /* ── /schedule command ─────────────────────────────────── */
 
 async function cmdSchedule(client, rl, orchestrator) {
+  heading(`Schedule ${c.dim}(in-memory preview)${c.reset}`);
   const action = await interactiveSelect("What would you like to do?", [
     "create",
     "list",
@@ -949,27 +950,45 @@ export async function cmdDemo(client, rl, orchestrator) {
   console.log("");
   const startTime = Date.now();
 
+  const abortController = new AbortController();
+  const onSigint = () => {
+    console.log(`\n  ${c.yellow}Cancelling demo...${c.reset}`);
+    abortController.abort();
+  };
+  
+  if (rl) {
+    rl.on("SIGINT", onSigint);
+  }
+
   // Execute workflow with live progress
-  const run = await orchestrator.submitWorkflow(workflow, {
-    onProgress: (r) => {
-      // Show each task status change
-      for (const task of r.tasks) {
-        if (
-          task.status !== "pending" &&
-          !task._displayed
-        ) {
-          const taskDef = TASK_TYPES[task.type] || { icon: "·" };
-          const icon = statusIcon(task.status);
-          console.log(
-            `  ${icon} ${taskDef.icon}  ${task.taskId.padEnd(16)} ${c.dim}${task.status}${c.reset}`,
-          );
-          if (["succeeded", "failed", "cancelled"].includes(task.status)) {
-            task._displayed = true;
+  let run;
+  try {
+    run = await orchestrator.submitWorkflow(workflow, {
+      signal: abortController.signal,
+      onProgress: (r) => {
+        // Show each task status change
+        for (const task of r.tasks) {
+          if (
+            task.status !== "pending" &&
+            task._lastDisplayedStatus !== task.status
+          ) {
+            const taskDef = TASK_TYPES[task.type] || { icon: "·" };
+            const icon = statusIcon(task.status);
+            console.log(
+              `  ${icon} ${taskDef.icon}  ${task.taskId.padEnd(16)} ${c.dim}${task.status}${c.reset}`,
+            );
+            task._lastDisplayedStatus = task.status;
           }
         }
-      }
-    },
-  });
+      },
+    });
+  } catch (e) {
+    if (rl) rl.removeListener("SIGINT", onSigint);
+    console.log(`\n  ${c.red}${e.message}${c.reset}\n`);
+    return;
+  }
+  
+  if (rl) rl.removeListener("SIGINT", onSigint);
 
   const elapsed = Date.now() - startTime;
 
@@ -979,15 +998,28 @@ export async function cmdDemo(client, rl, orchestrator) {
   const parallelCount = 3;
 
   if (run.status === "succeeded" || run.status === "failed") {
+    const api1Task = run.tasks.find(t => t.taskId === "api-1");
+    const api2Task = run.tasks.find(t => t.taskId === "api-2");
+    const api3Task = run.tasks.find(t => t.taskId === "api-3");
+    
+    let api3Result = "failed";
+    if (api3Task?.status === "succeeded") {
+      api3Result = "healthy after retry";
+    }
+
+    const state = await fetchState(client);
     console.log(
       box([
         `${run.status === 'succeeded' ? c.green + sym.check : c.red + sym.cross}${c.reset} ${c.bold}Automation complete${c.reset}`,
         "",
-        `Checks         3`,
-        `Parallel steps ${parallelCount}`,
-        `Retries        1`,
-        `Workers        ${(await fetchState(client)).workerCount}`,
-        `Result         ${run.status === 'succeeded' ? c.green + 'healthy' : c.red + 'failed'}${c.reset}`,
+        `Endpoint checks`,
+        `  ${api1Task?.status === 'succeeded' ? c.green + sym.check + ' api-1 healthy' : c.red + sym.cross + ' api-1 failed'}${c.reset}`,
+        `  ${api2Task?.status === 'succeeded' ? c.green + sym.check + ' api-2 healthy' : c.red + sym.cross + ' api-2 failed'}${c.reset}`,
+        `  ${api3Result === 'failed' ? c.red + sym.cross + ' api-3 failed' : c.green + sym.check + ' api-3 ' + api3Result}${c.reset}`,
+        "",
+        `Retries        ${api3Result === 'failed' ? '3 (failed)' : '1 (recovered)'}`,
+        `Workers        ${state.workerCount}`,
+        `Duration       ${(elapsed / 1000).toFixed(1)}s`,
       ]),
     );
   }
@@ -996,6 +1028,7 @@ export async function cmdDemo(client, rl, orchestrator) {
 /* ── /runs command ─────────────────────────────────────── */
 
 async function cmdRuns(client, args, rl, orchestrator) {
+  heading(`Runs ${c.dim}(in-memory preview)${c.reset}`);
   const runs = orchestrator.listRuns();
 
   if (runs.length === 0) {
@@ -1128,12 +1161,12 @@ async function cmdWorkers(client) {
     }
 
     const rows = nodes.map((n) => [
-      statusDot(n.status === "active"),
+      statusDot(n.status === "registered"),
       n.nodeId || n.id,
-      n.status === "active"
+      n.status === "registered"
         ? `${c.green}healthy${c.reset}`
         : `${c.yellow}${n.status}${c.reset}`,
-      `heartbeat ${timeAgo(n.lastHeartbeat)}`,
+      `heartbeat ${n.lastHeartbeatAt ? timeAgo(n.lastHeartbeatAt) : "never"}`,
     ]);
 
     console.log(table(["", "NODE", "STATUS", "HEARTBEAT"], rows));
@@ -1175,8 +1208,8 @@ async function cmdStatus(client, orchestrator) {
         ? `${c.green}${health.activeWorkers} online${c.reset}`
         : `${c.yellow}0 online${c.reset}`,
     ],
-    ["Active runs", String(activeRuns)],
-    ["Schedules", String(schedules.length)],
+    [`Active runs ${c.dim}(in-memory)${c.reset}`, String(activeRuns)],
+    [`Schedules ${c.dim}(in-memory)${c.reset}`, String(schedules.length)],
     ["Queued", String(jobStats.queued)],
     ["Running", String(jobStats.running)],
     ["Succeeded", String(jobStats.succeeded)],

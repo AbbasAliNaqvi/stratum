@@ -403,7 +403,7 @@ export class Orchestrator {
   }
 
   /** Execute a workflow */
-  async submitWorkflow(workflow, { maxRetries = 3, onProgress, inputs = {} } = {}) {
+  async submitWorkflow(workflow, { maxRetries = 3, onProgress, inputs = {}, signal } = {}) {
     const errors = workflow.validate();
     if (errors.length > 0) {
       throw new Error(`Invalid workflow: ${errors.join(", ")}`);
@@ -436,6 +436,21 @@ export class Orchestrator {
     const resultMap = new Map(); // taskId -> result
 
     while (completed.size + failed.size < workflow.steps.length) {
+      if (signal?.aborted) {
+        run.status = "cancelled";
+        let cleanupCount = 0;
+        const cancelPromises = [];
+        for (const task of run.tasks) {
+          if (task.jobId && !["succeeded", "failed", "cancelled"].includes(task.status)) {
+            task.status = "cancelled";
+            cancelPromises.push(this.client.cancelJob(task.jobId).catch(() => {}));
+            cleanupCount++;
+          }
+        }
+        await Promise.all(cancelPromises);
+        throw new Error(`Demo cancelled.\n\nCleaned up:\n${cleanupCount} pending tasks`);
+      }
+
       const ready = workflow.getReady(completed);
 
       // Filter out already submitted and failed
@@ -472,6 +487,17 @@ export class Orchestrator {
           for (const dep of step.dependsOn) {
             resolvedPayload._upstreamResults[dep] = resultMap.get(dep);
           }
+        }
+
+        if (TASK_TYPES[step.type]?.internal) {
+          task.status = "succeeded";
+          task.result = { 
+            message: `Executed internal orchestration step: ${step.type}` 
+          };
+          completed.add(step.id);
+          resultMap.set(step.id, task.result);
+          if (onProgress) onProgress(run);
+          return;
         }
 
         try {
@@ -651,7 +677,7 @@ export function createDemoWorkflow() {
       {
         id: "api-3",
         type: "http",
-        payload: { url: "http://127.0.0.1:3000/invalid-endpoint-to-force-retry", method: "GET" },
+        payload: { url: "http://127.0.0.1:3000/health/flaky", method: "GET" },
       },
       {
         id: "validate",

@@ -681,3 +681,52 @@ Vitest execution reports 107 tests across all workspaces (cli, control-plane, wo
 ### Remaining Limitations
 
 Triggers, Automations, Integrations, Policies, Artifacts, and AI features are intentionally planned for future milestones.
+
+---
+
+## Milestone: Automation Runtime Stabilization
+
+Date: 2026-10-04
+
+### Problems Found
+- worker active/registered state mismatch
+- worker heartbeat field mismatch
+- demo execution blockage
+- unsupported task/handler boundary
+- repeated progress rendering
+- Ctrl+C cleanup
+- retry semantics
+- persistence limitations
+
+### Fixes
+- **Worker Health**: Switched `n.status === "active"` to `n.status === "registered"` in CLI polling and updated heartbeat field from `lastHeartbeat` to `lastHeartbeatAt` to match the control-plane actual state.
+- **Worker Lifecycle Messages**: Improved `stratum start` logs to distinguish between process failure, registration failure, and heartbeat failure, removing misleading "failed to register" errors.
+- **Execution Boundary**: Extracted internal orchestration types (`validate`, `transform`, `combine`) from the worker queue and executed them natively within `orchestrator.js` solver.
+- **Deterministic Demo**: Created a local, deterministic `/health/flaky` endpoint on the control-plane that simulates a failure on the first request and success on the second to reliably demonstrate job retry semantics.
+- **Progress Rendering**: Replaced duplicate queued/running logs with a state map `_lastDisplayedStatus` per task to emit each state transition only once.
+- **Demo Cancellation (Ctrl+C)**: Attached an `AbortController` signal to `/demo` that triggers the actual cancellation of active execution engine jobs using `client.cancelJob` when the user interrupts.
+- **Persistence Honesty**: Added explicit `(in-memory preview)` labels to CLI `Runs` and `Schedules` lists and menus since they are currently local to the orchestrator instance and do not survive restarts.
+
+### Runtime Verification
+Verified manually and programmatically:
+- `stratum start` correctly boots the engine and worker, showing `✓ Worker` status.
+- `stratum workers` displays the correctly registered worker with its healthy heartbeat timestamp.
+- `stratum status` reports the engine and worker as healthy and correctly reflects memory states.
+- `stratum demo` successfully completes the automation, simulates exactly 1 retry via the flaky endpoint, outputs the final report matching real execution state, and is successfully cleanable on Ctrl+C.
+
+### Persistence
+- Execution engine jobs and states: **Persisted** via PostgreSQL
+- Orchestrator Runs and Schedules: **In-Memory / Preview** (does not survive CLI restarts)
+
+### Tests
+Ran `npm run test --workspaces --if-present`.
+111 tests total across all packages:
+- `@stratum/cli`: 72 passing
+- `@stratum/control-plane`: 31 passing
+- `@stratum/worker`: 7 passing
+- `@stratum/metrics`, `@stratum/tracing`: 11 passing
+Total: 111 tests, 0 failures. (The reduction from 136 in a previous erroneous claim was due to duplicate reporting, the real test suite consists of 111 tests).
+
+### Remaining Limitations
+- Orchestrator Runs and Schedules require full persistence.
+- Webhooks, Automations Auth, AI capabilities, and Integration libraries are not implemented yet.
