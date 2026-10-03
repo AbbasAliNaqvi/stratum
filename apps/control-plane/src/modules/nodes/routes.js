@@ -1,7 +1,4 @@
-import {
-  NodeRegisterInputSchema,
-  NodeSchema
-} from "@stratum/contracts";
+import { NodeRegisterInputSchema, NodeSchema } from "@stratum/contracts";
 
 import { registerNode, heartbeatNode } from "./service.js";
 import { db } from "../../db/client.js";
@@ -10,13 +7,11 @@ import { eq } from "drizzle-orm";
 
 export async function nodeRoutes(app) {
   app.get("/nodes", async () => {
-    const rows = await db
-      .select()
-      .from(nodes);
+    const rows = await db.select().from(nodes);
 
     return {
       nodes: rows,
-      count: rows.length
+      count: rows.length,
     };
   });
   app.get("/nodes/:nodeId", async (request, reply) => {
@@ -32,8 +27,8 @@ export async function nodeRoutes(app) {
       return reply.code(404).send({
         error: {
           code: "NODE_NOT_FOUND",
-          message: `Node '${nodeId}' not found`
-        }
+          message: `Node '${nodeId}' not found`,
+        },
       });
     }
 
@@ -43,7 +38,7 @@ export async function nodeRoutes(app) {
       ...node,
       createdAt: node.createdAt.toISOString(),
       updatedAt: node.updatedAt.toISOString(),
-      lastHeartbeatAt: node.lastHeartbeatAt.toISOString()
+      lastHeartbeatAt: node.lastHeartbeatAt.toISOString(),
     });
   });
   app.post("/nodes", async (request, reply) => {
@@ -54,8 +49,8 @@ export async function nodeRoutes(app) {
         error: {
           code: "INVALID_REQUEST",
           message: "Invalid node registration payload",
-          details: parsed.error.flatten()
-        }
+          details: parsed.error.flatten(),
+        },
       });
     }
 
@@ -67,29 +62,26 @@ export async function nodeRoutes(app) {
           ...node,
           createdAt: node.createdAt.toISOString(),
           updatedAt: node.updatedAt.toISOString(),
-          lastHeartbeatAt: node.lastHeartbeatAt.toISOString()
-        })
+          lastHeartbeatAt: node.lastHeartbeatAt.toISOString(),
+        }),
       );
     } catch (error) {
       if (error.code === "NODE_ALREADY_EXISTS") {
         return reply.code(409).send({
           error: {
             code: error.code,
-            message: error.message
-          }
+            message: error.message,
+          },
         });
       }
 
-      request.log.error(
-        { err: error },
-        "Node registration failed"
-      );
+      request.log.error({ err: error }, "Node registration failed");
 
       return reply.code(500).send({
         error: {
           code: "INTERNAL_ERROR",
-          message: "Failed to register node"
-        }
+          message: "Failed to register node",
+        },
       });
     }
   });
@@ -104,29 +96,26 @@ export async function nodeRoutes(app) {
           ...node,
           createdAt: node.createdAt.toISOString(),
           updatedAt: node.updatedAt.toISOString(),
-          lastHeartbeatAt: node.lastHeartbeatAt.toISOString()
-        })
+          lastHeartbeatAt: node.lastHeartbeatAt.toISOString(),
+        }),
       );
     } catch (error) {
       if (error.code === "NODE_NOT_FOUND") {
         return reply.code(404).send({
           error: {
             code: error.code,
-            message: error.message
-          }
+            message: error.message,
+          },
         });
       }
 
-      request.log.error(
-        { err: error },
-        "Node heartbeat failed"
-      );
+      request.log.error({ err: error }, "Node heartbeat failed");
 
       return reply.code(500).send({
         error: {
           code: "INTERNAL_ERROR",
-          message: "Failed to process node heartbeat"
-        }
+          message: "Failed to process node heartbeat",
+        },
       });
     }
   });

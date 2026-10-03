@@ -267,7 +267,7 @@ export async function reclaimJobsForNode(nodeId) {
     for (const currentJob of runningJobs) {
       const shouldFail = currentJob.retryCount >= currentJob.maxRetries;
       const targetState = shouldFail ? "failed" : "queued";
-      
+
       assertValidTransition(currentJob.status, targetState);
 
       const nextRetryCount = currentJob.retryCount + 1;
@@ -509,10 +509,7 @@ export async function acknowledgeJobCancellation({
       };
     }
 
-    if (
-      currentJob.status !== "running" ||
-      !currentJob.cancelRequestedAt
-    ) {
+    if (currentJob.status !== "running" || !currentJob.cancelRequestedAt) {
       return {
         job: currentJob,
         event: null,
@@ -577,9 +574,7 @@ export async function renewJobLease({
 }) {
   return db.transaction(async (tx) => {
     const now = new Date();
-    const leaseExpiresAt = new Date(
-      now.getTime() + leaseDurationMs
-    );
+    const leaseExpiresAt = new Date(now.getTime() + leaseDurationMs);
 
     const [job] = await tx
       .update(jobs)

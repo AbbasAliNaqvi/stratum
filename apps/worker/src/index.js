@@ -101,9 +101,12 @@ async function shutdown(signal) {
   stopHeartbeat();
   stopMetricsDump();
   jobPoller.stop();
-  
+
   // Dump metrics one last time on exit
-  logger.info({ event: "worker_metrics_dump_final" }, `\n${registry.metrics()}`);
+  logger.info(
+    { event: "worker_metrics_dump_final" },
+    `\n${registry.metrics()}`,
+  );
 }
 
 async function start() {
@@ -144,4 +147,3 @@ process.on("SIGTERM", () => {
 });
 
 void start();
-

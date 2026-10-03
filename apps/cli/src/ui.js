@@ -53,6 +53,9 @@ export const sym = {
   tr: "╮",
   bl: "╰",
   br: "╯",
+  treeT: "├─",
+  treeL: "└─",
+  treePipe: "│ ",
   spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
 };
 
@@ -215,4 +218,68 @@ export function shortTime(ts) {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+/* ── Duration formatting ───────────────────────────────── */
+
+export function formatDuration(startTs, endTs) {
+  if (!startTs || !endTs) return "—";
+  const ms = new Date(endTs).getTime() - new Date(startTs).getTime();
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
+}
+
+/* ── Tree / timeline rendering ─────────────────────────── */
+
+export function timeline(steps) {
+  return steps
+    .map((step, i) => {
+      const isLast = i === steps.length - 1;
+      const branch = isLast ? sym.treeL : sym.treeT;
+      return `  ${c.dim}${branch}${c.reset} ${step}`;
+    })
+    .join("\n");
+}
+
+/* ── Fuzzy matching ────────────────────────────────────── */
+
+/**
+ * Levenshtein distance between two strings.
+ * Used for typo suggestions.
+ */
+export function levenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+/**
+ * Find closest matches for a typo against a list of candidates.
+ * Returns candidates within a reasonable edit distance, sorted by closeness.
+ */
+export function fuzzyMatch(input, candidates, maxDistance = 3) {
+  const lowerInput = input.toLowerCase();
+
+  // If there's an exact match, don't return typo suggestions
+  if (candidates.some((c) => c.toLowerCase() === lowerInput)) {
+    return [];
+  }
+
+  return candidates
+    .map((c) => ({ name: c, dist: levenshtein(lowerInput, c.toLowerCase()) }))
+    .filter((c) => c.dist <= maxDistance && c.dist > 0)
+    .sort((a, b) => a.dist - b.dist)
+    .map((c) => c.name);
 }

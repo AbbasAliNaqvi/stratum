@@ -11,17 +11,17 @@ import { metricsRoutes } from "./modules/metrics/routes.js";
 
 const httpRequestsTotal = registry.counter({
   name: "stratum_http_requests_total",
-  help: "Total HTTP requests"
+  help: "Total HTTP requests",
 });
 const httpRequestDuration = registry.histogram({
   name: "stratum_http_request_duration_seconds",
-  help: "HTTP request duration in seconds"
+  help: "HTTP request duration in seconds",
 });
 
 class StratumLogController extends LogController {
   constructor() {
     super({
-      disableRequestLogging: true
+      disableRequestLogging: true,
     });
   }
 }
@@ -29,7 +29,7 @@ class StratumLogController extends LogController {
 export function buildApp() {
   const app = Fastify({
     loggerInstance: logger,
-    logController: new StratumLogController()
+    logController: new StratumLogController(),
   });
 
   app.addHook("onRequest", (request, reply, done) => {
@@ -60,7 +60,7 @@ export function buildApp() {
       const labels = {
         method: request.method,
         route,
-        status: String(status)
+        status: String(status),
       };
 
       httpRequestsTotal.inc(labels);
@@ -69,10 +69,7 @@ export function buildApp() {
 
     const duration = `${reply.elapsedTime.toFixed(2)}ms`;
 
-    const level =
-      status >= 500 ? "error" :
-      status >= 400 ? "warn" :
-      "info";
+    const level = status >= 500 ? "error" : status >= 400 ? "warn" : "info";
 
     request.log[level](
       {
@@ -80,9 +77,9 @@ export function buildApp() {
         method: request.method,
         url: request.url,
         statusCode: status,
-        responseTime: Number(reply.elapsedTime.toFixed(2))
+        responseTime: Number(reply.elapsedTime.toFixed(2)),
       },
-      `${method} ${request.url} → ${status} (${duration})`
+      `${method} ${request.url} → ${status} (${duration})`,
     );
 
     if (request.span) {

@@ -35,9 +35,7 @@ async function createTestNode() {
     });
 }
 
-async function createTestJob(
-  overrides = {}
-) {
+async function createTestJob(overrides = {}) {
   const [job] = await db
     .insert(jobs)
     .values({
@@ -57,9 +55,7 @@ async function createTestJob(
        * This avoids relying on PostgreSQL's clock/defaultNow()
        * being perfectly aligned with Node's new Date().
        */
-      runAfter: new Date(
-        Date.now() - 5_000
-      ),
+      runAfter: new Date(Date.now() - 5_000),
 
       ...overrides,
     })
@@ -519,9 +515,7 @@ describe("job lease fencing", () => {
 
     expect(renewed.leaseToken).toBe(claimed.job.leaseToken);
 
-    const newLeaseExpiresAt = new Date(
-      renewed.leaseExpiresAt,
-    ).getTime();
+    const newLeaseExpiresAt = new Date(renewed.leaseExpiresAt).getTime();
 
     expect(newLeaseExpiresAt).toBeGreaterThan(originalLeaseExpiresAt);
   });

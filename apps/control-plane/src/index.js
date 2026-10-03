@@ -6,21 +6,19 @@ import { startNodeLivenessMonitor } from "./modules/nodes/monitor.js";
 
 const app = buildApp();
 
-const stopNodeLivenessMonitor = startNodeLivenessMonitor(
-  app.log
-);
+const stopNodeLivenessMonitor = startNodeLivenessMonitor(app.log);
 
 async function start() {
   try {
     await app.listen({
       host: config.CONTROL_PLANE_HOST,
-      port: config.CONTROL_PLANE_PORT
+      port: config.CONTROL_PLANE_PORT,
     });
 
     printStartup({
       host: config.CONTROL_PLANE_HOST,
       port: config.CONTROL_PLANE_PORT,
-      database: "PostgreSQL"
+      database: "PostgreSQL",
     });
   } catch (error) {
     app.log.error(error);

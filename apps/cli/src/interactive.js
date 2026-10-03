@@ -1,8 +1,9 @@
 /**
- * Stratum Interactive Console — v2
+ * Stratum Interactive Console — v3
  *
- * Persistent slash-command REPL with autocomplete,
- * command history, polished output, and clean terminal handling.
+ * Persistent slash-command REPL with live suggestions,
+ * fuzzy typo correction, arrow-key selection, command history,
+ * guided /work palette, polished output, and clean terminal handling.
  */
 
 import readline from "node:readline";
@@ -23,11 +24,13 @@ import {
   success,
   error,
   warn,
-  info,
   dim,
   timeAgo,
   shortTime,
+  formatDuration,
+  timeline,
   createSpinner,
+  fuzzyMatch,
   CLEAR,
 } from "./ui.js";
 
@@ -38,7 +41,7 @@ const COMMANDS = [
     name: "/work",
     alias: ["/w", "/run"],
     desc: "Run distributed work",
-    help: "Create and submit work to the Stratum engine.\n\n  Usage:  /work\n\n  Walks you through selecting a workload type and\n  configuring its parameters interactively.",
+    help: "Create and submit work to the Stratum engine.\n\n  Usage:  /work\n\n  Walks you through selecting a workload type and\n  configuring its parameters interactively.\n\n  Supported workloads:\n    echo    Send a message through the engine\n    sleep   Run a timed delay job",
   },
   {
     name: "/jobs",
@@ -68,7 +71,7 @@ const COMMANDS = [
     name: "/doctor",
     alias: [],
     desc: "Diagnose problems",
-    help: "Run the full Stratum diagnostic suite checking\n  Node.js, PostgreSQL, database, schema, and services.",
+    help: "Run the full Stratum diagnostic suite.\n  Checks Node.js version, Control Plane reachability,\n  and worker registration. Provides actionable suggestions\n  for each problem found.",
   },
   {
     name: "/model",
@@ -98,14 +101,34 @@ const COMMANDS = [
     name: "/quit",
     alias: ["/q", "/exit"],
     desc: "Exit",
-    help: "Exit the Stratum console.",
+    help: "Exit the Stratum console. Aliases: /q, /exit",
   },
 ];
 
-function findCommand(input) {
+export { COMMANDS };
+
+export function findCommand(input) {
   const name = input.toLowerCase().split(/\s+/)[0];
-  return COMMANDS.find(
-    (cmd) => cmd.name === name || cmd.alias.includes(name),
+  return COMMANDS.find((cmd) => cmd.name === name || cmd.alias.includes(name));
+}
+
+/**
+ * Suggest corrections for an unknown command.
+ */
+export function suggestCommand(input) {
+  const name = input.toLowerCase().split(/\s+/)[0];
+  const allNames = COMMANDS.flatMap((cmd) => [cmd.name, ...cmd.alias]);
+  return fuzzyMatch(name, allNames, 3);
+}
+
+/**
+ * Filter commands matching a prefix (for autocomplete suggestions).
+ */
+export function filterCommands(prefix) {
+  const lower = prefix.toLowerCase();
+  return COMMANDS.filter(
+    (cmd) =>
+      cmd.name.startsWith(lower) || cmd.alias.some((a) => a.startsWith(lower)),
   );
 }
 
@@ -145,20 +168,20 @@ async function fetchState(client) {
 
 /* ── Interactive selection (arrow-key menu) ─────────────── */
 
-function interactiveSelect(prompt, options) {
+function interactiveSelect(prompt, options, { labels } = {}) {
   return new Promise((resolve) => {
     let selected = 0;
+    const displayLabels = labels || options;
 
     function render() {
-      // Move cursor up to clear previous render (except first time)
       process.stdout.write(`\n  ${c.bold}${prompt}${c.reset}\n\n`);
-      options.forEach((opt, i) => {
+      displayLabels.forEach((label, i) => {
         if (i === selected) {
           process.stdout.write(
-            `  ${c.cyan}${sym.arrow}${c.reset} ${c.bold}${opt}${c.reset}\n`,
+            `  ${c.cyan}${sym.arrow}${c.reset} ${c.bold}${label}${c.reset}\n`,
           );
         } else {
-          process.stdout.write(`    ${c.dim}${opt}${c.reset}\n`);
+          process.stdout.write(`    ${c.dim}${label}${c.reset}\n`);
         }
       });
       process.stdout.write(
@@ -167,8 +190,7 @@ function interactiveSelect(prompt, options) {
     }
 
     function clearRender() {
-      // Move up: prompt(1) + blank(1) + options + footer(1) + blank between(1)
-      const lines = options.length + 4;
+      const lines = displayLabels.length + 4;
       for (let i = 0; i < lines; i++) {
         process.stdout.write("\u001b[1A\u001b[2K");
       }
@@ -184,12 +206,10 @@ function interactiveSelect(prompt, options) {
       const key = buf.toString();
 
       if (key === "\u001b[A") {
-        // Up
         clearRender();
         selected = (selected - 1 + options.length) % options.length;
         render();
       } else if (key === "\u001b[B") {
-        // Down
         clearRender();
         selected = (selected + 1) % options.length;
         render();
@@ -199,7 +219,6 @@ function interactiveSelect(prompt, options) {
         process.stdout.write(`\n`);
         resolve(options[selected]);
       } else if (key === "\u001b" || key === "\u0003") {
-        // Escape or Ctrl+C
         cleanup();
         clearRender();
         process.stdout.write(`\n`);
@@ -219,47 +238,151 @@ function interactiveSelect(prompt, options) {
 
 /* ── Inline prompt ─────────────────────────────────────── */
 
-function inlinePrompt(rl, label, defaultVal) {
+export function inlinePrompt(rl, label, defaultVal) {
   return new Promise((resolve) => {
     const suffix = defaultVal ? ` ${c.dim}(${defaultVal})${c.reset}` : "";
-    rl.question(`  ${c.bold}${label}${c.reset}${suffix} ${sym.arrow} `, (answer) => {
-      resolve(answer.trim() || defaultVal || "");
-    });
+    const ac = new AbortController();
+
+    const onKeypress = (s, key) => {
+      if (key && key.name === "escape") {
+        ac.abort();
+        process.stdout.write("\n");
+        resolve(null);
+      }
+    };
+
+    process.stdin.on("keypress", onKeypress);
+
+    // Some environments/tests might not support options in question() fully,
+    // so we wrap it in a try-catch or just rely on manual cleanup if aborted.
+    try {
+      rl.question(
+        `  ${c.bold}${label}${c.reset}${suffix} ${sym.arrow} `,
+        { signal: ac.signal },
+        (answer) => {
+          process.stdin.removeListener("keypress", onKeypress);
+          if (!ac.signal.aborted) {
+            resolve(answer.trim() || defaultVal || "");
+          }
+        },
+      );
+    } catch (e) {
+      // Fallback for older Node versions or if signal is rejected
+      rl.question(
+        `  ${c.bold}${label}${c.reset}${suffix} ${sym.arrow} `,
+        (answer) => {
+          process.stdin.removeListener("keypress", onKeypress);
+          if (!ac.signal.aborted) {
+            resolve(answer.trim() || defaultVal || "");
+          }
+        },
+      );
+    }
+
+    ac.signal.addEventListener(
+      "abort",
+      () => {
+        process.stdin.removeListener("keypress", onKeypress);
+      },
+      { once: true },
+    );
   });
 }
 
 /* ── Slash command implementations ─────────────────────── */
 
 async function cmdWork(client, rl) {
-  const type = await interactiveSelect("What would you like Stratum to run?", [
-    "echo",
-    "sleep",
+  const typeLabel = await interactiveSelect("What do you want to run?", [
+    "Echo message",
+    "Wait / Delay",
+    "HTTP Request",
+    "Run Command",
   ]);
 
-  if (!type) return;
+  if (!typeLabel) return;
 
+  let type = "";
   let payload;
-  if (type === "echo") {
+  if (typeLabel === "Echo message") {
+    type = "echo";
     const msg = await inlinePrompt(rl, "Message", "Hello Stratum");
+    if (msg === null) {
+      dim("  Cancelled.");
+      return;
+    }
     payload = { message: msg };
-  } else if (type === "sleep") {
+  } else if (typeLabel === "Wait / Delay") {
+    type = "sleep";
     const dur = await inlinePrompt(rl, "Duration (ms)", "15000");
-    payload = { durationMs: parseInt(dur, 10) || 15000 };
+    if (dur === null) {
+      dim("  Cancelled.");
+      return;
+    }
+    const parsed = parseInt(dur, 10);
+    if (isNaN(parsed) || parsed <= 0) {
+      error("  Duration must be a positive number.");
+      return;
+    }
+    payload = { durationMs: parsed };
+  } else if (typeLabel === "HTTP Request") {
+    type = "http";
+    const url = await inlinePrompt(rl, "URL", "https://example.com");
+    if (url === null) {
+      dim("  Cancelled.");
+      return;
+    }
+    const method = await inlinePrompt(rl, "Method", "GET");
+    if (method === null) {
+      dim("  Cancelled.");
+      return;
+    }
+    const timeout = await inlinePrompt(rl, "Timeout", "30s");
+    if (timeout === null) {
+      dim("  Cancelled.");
+      return;
+    }
+
+    payload = {
+      url,
+      method: method.toUpperCase(),
+      timeout,
+    };
+  } else if (typeLabel === "Run Command") {
+    if (process.env.STRATUM_ENABLE_COMMAND_JOBS !== "true") {
+      console.log("");
+      error("Run Command is disabled.");
+      console.log(`\n  ${c.dim}Enable it with:${c.reset}`);
+      console.log(`  STRATUM_ENABLE_COMMAND_JOBS=true\n`);
+      return;
+    }
+
+    type = "command";
+    const cmd = await inlinePrompt(rl, "Command", "echo 'Hello'");
+    if (cmd === null) {
+      dim("  Cancelled.");
+      return;
+    }
+    payload = { command: cmd };
   }
 
   console.log("");
   console.log(
     kvPanel([
-      ["Type", type],
+      ["Type", typeLabel],
       ["Payload", JSON.stringify(payload)],
     ]),
   );
   console.log(
-    `\n  ${c.dim}Enter${c.reset} run  ${c.dim}Esc${c.reset} cancel\n`,
+    `\n  ${c.dim}Enter${c.reset} to run · ${c.dim}Esc${c.reset} to cancel\n`,
   );
 
-  const confirm = await inlinePrompt(rl, "Submit?", "y");
-  if (confirm.toLowerCase() !== "y" && confirm !== "") {
+  const confirm = await inlinePrompt(rl, "Submit?", "");
+  if (confirm === null) {
+    dim("  Cancelled.");
+    return;
+  }
+
+  if (confirm.toLowerCase() === "n" || confirm.toLowerCase() === "no") {
     dim("  Cancelled.");
     return;
   }
@@ -275,26 +398,31 @@ async function cmdWork(client, rl) {
       maxRetries: 3,
     });
     spinner.stop(`${c.green}${sym.check}${c.reset} Work submitted`);
-    console.log(`\n  ${c.dim}ID${c.reset}     ${result.job.id}`);
-    console.log(`  ${c.dim}Status${c.reset} ${result.job.status}`);
 
-    // Watch the job for up to 30s
-    console.log(`\n  ${c.dim}Watching…${c.reset}`);
+    console.log("");
+    console.log(
+      kvPanel([
+        ["ID", result.job.id],
+        ["Type", typeLabel],
+        ["Status", result.job.status],
+      ]),
+    );
+
+    // Watch the job with timeline display
+    console.log(`\n  ${c.dim}Watching…${c.reset}\n`);
+    const steps = [result.job.status];
     let prev = result.job.status;
+    const startTime = Date.now();
+
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 1000));
       try {
         const check = await client.getJob(result.job.id);
         if (check.job.status !== prev) {
-          const icon = statusIcon(check.job.status);
-          console.log(`  ${icon} ${check.job.status}`);
+          steps.push(check.job.status);
           prev = check.job.status;
+
           if (["succeeded", "failed", "cancelled"].includes(prev)) {
-            if (check.job.result) {
-              console.log(
-                `\n  ${c.dim}Result${c.reset} ${JSON.stringify(check.job.result)}`,
-              );
-            }
             break;
           }
         }
@@ -302,13 +430,52 @@ async function cmdWork(client, rl) {
         break;
       }
     }
+
+    // Render final timeline (outside the loop to prevent duplicates)
+    const elapsed = Date.now() - startTime;
+    const timelineSteps = steps.map((s) => {
+      const icon = statusIcon(s);
+      return `${icon} ${s}`;
+    });
+    console.log(timeline(timelineSteps));
+    console.log("");
+
+    if (prev === "succeeded") {
+      success(
+        `Completed in ${elapsed < 1000 ? elapsed + "ms" : (elapsed / 1000).toFixed(1) + "s"}`,
+      );
+    } else if (prev === "failed") {
+      error(`Failed after ${(elapsed / 1000).toFixed(1)}s`);
+    } else if (prev === "cancelled") {
+      dim(`  Cancelled after ${(elapsed / 1000).toFixed(1)}s`);
+    } else {
+      dim(`  Still ${prev}. Use /jobs to check later.`);
+    }
+
+    try {
+      const check = await client.getJob(result.job.id);
+      if (check.job.result) {
+        console.log(
+          `\n  ${c.dim}Result${c.reset} ${JSON.stringify(check.job.result)}`,
+        );
+      }
+      if (check.job.error) {
+        console.log(`\n  ${c.dim}Error${c.reset} ${check.job.error}`);
+      }
+    } catch {}
+
+    console.log(
+      `\n  ${c.dim}${sym.arrow} /jobs  inspect jobs   ${sym.arrow} /work  run more work${c.reset}`,
+    );
   } catch (e) {
     spinner.stop(`${c.red}${sym.cross}${c.reset} Submission failed`);
-    error(`  ${e.message}`);
+    console.log("");
+    error(`${e.message}`);
+    console.log(`\n  ${c.dim}Check: /doctor  or  stratum logs${c.reset}`);
   }
 }
 
-async function cmdJobs(client, args) {
+async function cmdJobs(client, args, rl) {
   const filter = args.trim() || undefined;
   try {
     const res = await client.listJobs(filter ? { status: filter } : {});
@@ -322,6 +489,8 @@ async function cmdJobs(client, args) {
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, 20);
 
+    heading(filter ? `Jobs — ${filter}` : "Jobs");
+
     const rows = sorted.map((j) => [
       statusIcon(j.status),
       j.id.substring(0, 8) + "…",
@@ -332,8 +501,78 @@ async function cmdJobs(client, args) {
 
     console.log(table(["", "ID", "TYPE", "STATUS", "AGE"], rows));
     console.log(`\n  ${c.dim}Total: ${jobs.length}${c.reset}`);
+
+    // Offer to view detail
+    if (sorted.length > 0 && rl) {
+      console.log(
+        `\n  ${c.dim}Type a job ID prefix to inspect, or Enter to skip${c.reset}`,
+      );
+      const pick = await inlinePrompt(rl, "Inspect", "");
+      if (pick) {
+        const match = sorted.find((j) => j.id.startsWith(pick));
+        if (match) {
+          await showJobDetail(client, match.id);
+        } else {
+          dim(`  No job matching "${pick}".`);
+        }
+      }
+    }
   } catch (e) {
-    error(`Cannot reach Control Plane: ${e.message}`);
+    error("Cannot reach Control Plane.");
+    dim(`\n  ${e.message}`);
+    console.log(`\n  ${c.dim}Run: stratum start  or  /doctor${c.reset}`);
+  }
+}
+
+async function showJobDetail(client, jobId) {
+  try {
+    const res = await client.getJob(jobId);
+    const j = res.job;
+
+    heading(`Job ${j.id.substring(0, 8)}…`);
+
+    const entries = [
+      ["Status", `${statusIcon(j.status)} ${j.status}`],
+      ["Type", j.type],
+    ];
+
+    if (j.lockedBy) entries.push(["Worker", j.lockedBy]);
+
+    entries.push([
+      "Duration",
+      formatDuration(j.startedAt, j.finishedAt || new Date().toISOString()),
+    ]);
+    entries.push(["Retries", `${j.retryCount}/${j.maxRetries}`]);
+    entries.push(["Created", timeAgo(j.createdAt)]);
+
+    if (j.idempotencyKey) entries.push(["Idempotency", j.idempotencyKey]);
+
+    console.log(kvPanel(entries));
+
+    if (j.result) {
+      console.log(`\n  ${c.dim}Result${c.reset}`);
+      console.log(`  ${JSON.stringify(j.result)}`);
+    }
+
+    if (j.error) {
+      console.log(`\n  ${c.dim}Error${c.reset}`);
+      console.log(`  ${j.error}`);
+    }
+
+    // Build lifecycle timeline from available timestamps
+    const steps = [];
+    steps.push(`${statusIcon("queued")} queued`);
+    if (j.startedAt) steps.push(`${statusIcon("running")} running`);
+    if (j.finishedAt) steps.push(`${statusIcon(j.status)} ${j.status}`);
+    if (j.cancelRequestedAt)
+      steps.push(`${statusIcon("cancelled")} cancel requested`);
+
+    if (steps.length > 1) {
+      console.log(`\n  ${c.dim}Timeline${c.reset}`);
+      console.log(timeline(steps));
+    }
+  } catch (e) {
+    error(`Could not fetch job: ${e.message}`);
   }
 }
 
@@ -342,21 +581,34 @@ async function cmdWorkers(client) {
     const health = await getSystemHealth(client);
     if (!health.cpReachable) {
       error("Control Plane is not reachable.");
-      dim("\n  Run: stratum start  or  /doctor");
+      console.log(
+        `\n  ${c.dim}Cause:${c.reset} Cannot connect to ${config.CONTROL_PLANE_URL}`,
+      );
+      console.log(`\n  ${c.dim}Suggested action:${c.reset}`);
+      console.log(`  ${c.cyan}${sym.arrow} stratum start${c.reset}`);
       return;
     }
 
     const nodesRes = await client.getNodes();
     const nodes = nodesRes.nodes || [];
+
+    heading("Workers");
+
     if (nodes.length === 0) {
       dim("  No workers online.");
+      console.log(
+        `\n  ${c.dim}Workers register automatically when started.${c.reset}`,
+      );
+      console.log(`  ${c.dim}Run: stratum start${c.reset}`);
       return;
     }
 
     const rows = nodes.map((n) => [
       statusDot(n.status === "active"),
       n.nodeId || n.id,
-      n.status,
+      n.status === "active"
+        ? `${c.green}healthy${c.reset}`
+        : `${c.yellow}${n.status}${c.reset}`,
       `heartbeat ${timeAgo(n.lastHeartbeat)}`,
     ]);
 
@@ -401,7 +653,10 @@ async function cmdStatus(client) {
 
   console.log(kvPanel(entries));
   console.log(
-    `\n${kvPanel([["Runtime", "local"], ["Endpoint", config.CONTROL_PLANE_URL]])}`,
+    `\n${kvPanel([
+      ["Runtime", "local"],
+      ["Endpoint", config.CONTROL_PLANE_URL],
+    ])}`,
   );
 }
 
@@ -439,7 +694,6 @@ async function cmdLogs() {
             display: `  ${c.dim}${time}${c.reset}  ${icon}  ${c.dim}${label}${c.reset}  ${msg}`,
           });
         } catch {
-          // Non-JSON log line
           lines.push({
             ts: "",
             display: `  ${c.dim}${label}${c.reset}  ${line.substring(0, 80)}`,
@@ -451,10 +705,10 @@ async function cmdLogs() {
 
   if (lines.length === 0) {
     dim("  No logs available. Services may not have started yet.");
+    console.log(`\n  ${c.dim}Run: stratum start${c.reset}`);
     return;
   }
 
-  // Sort by timestamp, show latest 20
   lines
     .sort((a, b) => (a.ts > b.ts ? 1 : -1))
     .slice(-20)
@@ -463,34 +717,56 @@ async function cmdLogs() {
 
 async function cmdDoctor(client) {
   heading("Stratum Doctor");
+  let allGood = true;
 
   // Node
   const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
   if (nodeMajor >= 22) {
     success(`Node.js ${process.versions.node}`);
   } else {
-    error(`Node.js ${process.versions.node} (requires >=22)`);
+    error(`Node.js ${process.versions.node}`);
+    console.log(
+      `\n  ${c.dim}Cause:${c.reset} Stratum requires Node.js 22 or newer.`,
+    );
+    console.log(`  ${c.dim}Current:${c.reset} v${process.versions.node}`);
+    console.log(`\n  ${c.dim}Suggested action:${c.reset}`);
+    console.log(`  Install Node.js 22+ from https://nodejs.org\n`);
+    allGood = false;
   }
 
-  // Health
+  // Control Plane
   const health = await getSystemHealth(client);
   if (health.cpReachable) {
     success("Control Plane");
   } else {
-    error("Control Plane (not reachable)");
+    error("Control Plane");
+    console.log(
+      `\n  ${c.dim}Cause:${c.reset} Cannot reach ${config.CONTROL_PLANE_URL}`,
+    );
+    console.log(`  The Control Plane API is not responding.`);
+    console.log(`\n  ${c.dim}Suggested action:${c.reset}`);
+    console.log(`  ${c.cyan}${sym.arrow} stratum start${c.reset}\n`);
+    allGood = false;
   }
 
+  // Workers
   if (health.activeWorkers > 0) {
     success(`Workers (${health.activeWorkers} online)`);
   } else {
-    error("Workers (none registered)");
+    error("Workers");
+    console.log(`\n  ${c.dim}Cause:${c.reset} No active worker is registered.`);
+    console.log(`  Jobs will remain queued until a worker is available.`);
+    console.log(`\n  ${c.dim}Suggested action:${c.reset}`);
+    console.log(`  ${c.cyan}${sym.arrow} stratum start${c.reset}\n`);
+    allGood = false;
   }
 
   console.log("");
-  if (health.cpReachable && health.activeWorkers > 0 && nodeMajor >= 22) {
-    dim("  Everything looks good.");
+  if (allGood) {
+    success("Everything looks good.");
   } else {
-    dim("  Some issues detected. Run: stratum init");
+    dim("  Fix the issues above, or run:");
+    console.log(`  ${c.cyan}${sym.arrow} stratum init${c.reset}`);
   }
 }
 
@@ -521,7 +797,12 @@ function cmdModel() {
         ["Provider", provider],
         ["Model", model],
         ["Endpoint", endpoint],
-        ["API Key", hasKey ? `${c.green}configured${c.reset}` : `${c.red}missing${c.reset}`],
+        [
+          "API Key",
+          hasKey
+            ? `${c.green}configured${c.reset}`
+            : `${c.red}missing${c.reset}`,
+        ],
       ]),
     );
   }
@@ -537,11 +818,13 @@ function cmdConfig() {
     kvPanel([
       ["Runtime", "local"],
       ["Control Plane", config.CONTROL_PLANE_URL],
+      ["Timeout", `${config.REQUEST_TIMEOUT_MS}ms`],
       [
-        "Timeout",
-        `${config.REQUEST_TIMEOUT_MS}ms`,
+        ".env",
+        envExists
+          ? `${c.green}present${c.reset}`
+          : `${c.yellow}missing${c.reset}`,
       ],
-      [".env", envExists ? `${c.green}present${c.reset}` : `${c.yellow}missing${c.reset}`],
       ["Project root", root],
       ["Logs", getLogDir()],
       ["AI provider", process.env.STRATUM_AI_PROVIDER || "none"],
@@ -553,17 +836,26 @@ function cmdHelp(args) {
   if (args.trim()) {
     const search = args.trim().replace(/^\//, "");
     const cmd = COMMANDS.find(
-      (c) =>
-        c.name === `/${search}` ||
-        c.alias.includes(`/${search}`) ||
-        c.name.includes(search),
+      (entry) =>
+        entry.name === `/${search}` ||
+        entry.alias.includes(`/${search}`) ||
+        entry.name.includes(search),
     );
     if (cmd) {
       heading(cmd.name);
       console.log(`  ${cmd.desc}\n`);
+      if (cmd.alias.length > 0) {
+        console.log(`  ${c.dim}Aliases: ${cmd.alias.join(", ")}${c.reset}\n`);
+      }
       if (cmd.help) console.log(cmd.help);
     } else {
       dim(`  Unknown command: ${search}`);
+      const suggestions = suggestCommand(`/${search}`);
+      if (suggestions.length > 0) {
+        console.log(
+          `\n  ${c.dim}Did you mean:${c.reset} ${c.cyan}${suggestions[0]}${c.reset}`,
+        );
+      }
     }
     return;
   }
@@ -582,10 +874,14 @@ function cmdHelp(args) {
       console.log(`  ${c.dim}${g.label}${c.reset}`);
     }
     for (const name of g.cmds) {
-      const cmd = COMMANDS.find((c) => c.name === name);
+      const cmd = COMMANDS.find((entry) => entry.name === name);
       if (cmd) {
+        const aliases =
+          cmd.alias.length > 0
+            ? ` ${c.dim}(${cmd.alias.join(", ")})${c.reset}`
+            : "";
         console.log(
-          `  ${c.cyan}${cmd.name.padEnd(12)}${c.reset} ${c.dim}${cmd.desc}${c.reset}`,
+          `  ${c.cyan}${cmd.name.padEnd(12)}${c.reset} ${c.dim}${cmd.desc}${c.reset}${aliases}`,
         );
       }
     }
@@ -639,13 +935,9 @@ async function renderHeader(client) {
 function completer(line) {
   if (!line.startsWith("/")) return [[], line];
 
-  const matches = COMMANDS.filter(
-    (cmd) =>
-      cmd.name.startsWith(line) ||
-      cmd.alias.some((a) => a.startsWith(line)),
-  ).map((cmd) => cmd.name);
+  const matches = filterCommands(line).map((cmd) => cmd.name);
 
-  return [matches.length ? matches : COMMANDS.map((c) => c.name), line];
+  return [matches.length ? matches : COMMANDS.map((entry) => entry.name), line];
 }
 
 /* ── Main REPL ─────────────────────────────────────────── */
@@ -655,7 +947,7 @@ export async function runDashboard(client) {
   await renderHeader(client);
 
   console.log(
-    `  ${c.dim}Type ${c.reset}/help${c.dim} for commands, ${c.reset}/work${c.dim} to run work${c.reset}\n`,
+    `  ${c.dim}Type ${c.reset}/help${c.dim} for commands, ${c.reset}/work${c.dim} to run work, ${c.reset}/${c.dim} for suggestions${c.reset}\n`,
   );
 
   const rl = readline.createInterface({
@@ -678,6 +970,19 @@ export async function runDashboard(client) {
       return;
     }
 
+    // Show suggestion list when user types exactly "/"
+    if (input === "/") {
+      console.log("");
+      for (const cmd of COMMANDS) {
+        console.log(
+          `  ${c.cyan}${cmd.name.padEnd(12)}${c.reset}  ${c.dim}${cmd.desc}${c.reset}`,
+        );
+      }
+      console.log("");
+      rl.prompt();
+      return;
+    }
+
     const cmd = findCommand(input);
     const args = input.replace(/^\/\S+\s*/, "");
 
@@ -685,10 +990,40 @@ export async function runDashboard(client) {
 
     try {
       if (!cmd && input.startsWith("/")) {
-        dim(`  Unknown command: ${input}`);
-        dim(`  Type /help for available commands.`);
+        // Show filtered suggestions for partial commands like "/wo"
+        const partial = input.split(/\s+/)[0];
+        const filtered = filterCommands(partial);
+
+        if (filtered.length > 0 && filtered.length < COMMANDS.length) {
+          dim(`  Unknown command: ${input}`);
+          console.log("");
+          console.log(`  ${c.dim}Did you mean:${c.reset}`);
+          for (const match of filtered.slice(0, 3)) {
+            console.log(
+              `  ${c.cyan}${sym.arrow} ${match.name}${c.reset}  ${c.dim}${match.desc}${c.reset}`,
+            );
+          }
+        } else {
+          // Fuzzy typo suggestions
+          const suggestions = suggestCommand(input);
+          dim(`  Unknown command: ${input}`);
+          if (suggestions.length > 0) {
+            console.log("");
+            console.log(`  ${c.dim}Did you mean:${c.reset}`);
+            for (const s of suggestions.slice(0, 3)) {
+              const matchCmd = COMMANDS.find(
+                (entry) => entry.name === s || entry.alias.includes(s),
+              );
+              const desc = matchCmd
+                ? `  ${c.dim}${matchCmd.desc}${c.reset}`
+                : "";
+              console.log(`  ${c.cyan}${sym.arrow} ${s}${c.reset}${desc}`);
+            }
+          } else {
+            dim(`  Type /help for available commands.`);
+          }
+        }
       } else if (!cmd) {
-        // Treat bare text as a search/shortcut
         dim(`  Type /help for available commands, or /work to run work.`);
       } else {
         switch (cmd.name) {
@@ -696,7 +1031,7 @@ export async function runDashboard(client) {
             await cmdWork(client, rl);
             break;
           case "/jobs":
-            await cmdJobs(client, args);
+            await cmdJobs(client, args, rl);
             break;
           case "/workers":
             await cmdWorkers(client);

@@ -7,10 +7,7 @@ export const JOB_STATES = {
 };
 
 export const VALID_TRANSITIONS = {
-  [JOB_STATES.QUEUED]: [
-    JOB_STATES.RUNNING,
-    JOB_STATES.CANCELLED,
-  ],
+  [JOB_STATES.QUEUED]: [JOB_STATES.RUNNING, JOB_STATES.CANCELLED],
   [JOB_STATES.RUNNING]: [
     JOB_STATES.SUCCEEDED,
     JOB_STATES.FAILED,
@@ -26,7 +23,11 @@ export const VALID_TRANSITIONS = {
 export function canTransition(fromState, toState) {
   if (fromState === toState) {
     // Idempotent terminal transitions are allowed
-    if ([JOB_STATES.SUCCEEDED, JOB_STATES.FAILED, JOB_STATES.CANCELLED].includes(toState)) {
+    if (
+      [JOB_STATES.SUCCEEDED, JOB_STATES.FAILED, JOB_STATES.CANCELLED].includes(
+        toState,
+      )
+    ) {
       return true;
     }
   }
@@ -37,7 +38,7 @@ export function canTransition(fromState, toState) {
 export function assertValidTransition(fromState, toState) {
   if (!canTransition(fromState, toState)) {
     const error = new Error(
-      `Invalid state transition from '${fromState}' to '${toState}'`
+      `Invalid state transition from '${fromState}' to '${toState}'`,
     );
     error.code = "INVALID_STATE_TRANSITION";
     throw error;

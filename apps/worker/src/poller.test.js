@@ -1,11 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createJobPoller } from "./poller.js";
 
@@ -58,9 +51,7 @@ function createRunningJob(overrides = {}) {
     payload: { durationMs: 5000 },
     status: "running",
     leaseToken: 1,
-    leaseExpiresAt: new Date(
-      Date.now() + 30_000
-    ).toISOString(),
+    leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(),
     cancelRequestedAt: null,
     ...overrides,
   };
@@ -101,9 +92,7 @@ describe("job poller lease renewal", () => {
      */
     const renewedJob = {
       ...job,
-      leaseExpiresAt: new Date(
-        Date.now() + 60_000
-      ).toISOString(),
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
 
     client.renewJobLease.mockResolvedValueOnce({
@@ -117,7 +106,7 @@ describe("job poller lease renewal", () => {
     executeJob.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveExecution = resolve;
-      })
+      }),
     );
 
     client.completeJob.mockResolvedValueOnce({
@@ -138,10 +127,7 @@ describe("job poller lease renewal", () => {
      */
     await vi.advanceTimersByTimeAsync(15_000);
 
-    expect(client.renewJobLease).toHaveBeenCalledWith(
-      job.id,
-      job.leaseToken,
-    );
+    expect(client.renewJobLease).toHaveBeenCalledWith(job.id, job.leaseToken);
 
     /*
      * Complete the execution.
@@ -169,16 +155,12 @@ describe("job poller lease renewal", () => {
 
     const firstRenewedJob = {
       ...job,
-      leaseExpiresAt: new Date(
-        Date.now() + 30_000
-      ).toISOString(),
+      leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(),
     };
 
     const secondRenewedJob = {
       ...job,
-      leaseExpiresAt: new Date(
-        Date.now() + 60_000
-      ).toISOString(),
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
 
     client.renewJobLease
@@ -189,7 +171,7 @@ describe("job poller lease renewal", () => {
     executeJob.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveExecution = resolve;
-      })
+      }),
     );
 
     client.completeJob.mockResolvedValueOnce({
@@ -245,7 +227,7 @@ describe("job poller lease renewal", () => {
     executeJob.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveExecution = resolve;
-      })
+      }),
     );
 
     const poller = createJobPoller({ client, logger });
@@ -313,9 +295,7 @@ describe("job poller lease renewal", () => {
 
     const renewedJob = {
       ...job,
-      leaseExpiresAt: new Date(
-        Date.now() + 60_000
-      ).toISOString(),
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
 
     client.renewJobLease
@@ -326,7 +306,7 @@ describe("job poller lease renewal", () => {
     executeJob.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveExecution = resolve;
-      })
+      }),
     );
 
     client.completeJob.mockResolvedValueOnce({
@@ -374,9 +354,7 @@ describe("job poller lease renewal", () => {
       /*
        * Short lease so renewal would be at 2.5s.
        */
-      leaseExpiresAt: new Date(
-        Date.now() + 5_000
-      ).toISOString(),
+      leaseExpiresAt: new Date(Date.now() + 5_000).toISOString(),
     });
 
     client.claimJob.mockResolvedValueOnce({
@@ -488,7 +466,7 @@ describe("job poller lease renewal", () => {
     executeJob.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveExecution = resolve;
-      })
+      }),
     );
 
     const poller = createJobPoller({ client, logger });

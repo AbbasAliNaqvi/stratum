@@ -33,6 +33,6 @@ export const config = {
   ),
 
   JOB_CANCEL_CHECK_INTERVAL_MS: Number(
-  process.env.STRATUM_JOB_CANCEL_CHECK_INTERVAL_MS ?? 500
-),
+    process.env.STRATUM_JOB_CANCEL_CHECK_INTERVAL_MS ?? 500,
+  ),
 };

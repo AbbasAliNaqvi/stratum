@@ -3,7 +3,7 @@ import { checkDatabaseConnection } from "../../db/client.js";
 export async function healthRoutes(app) {
   app.get("/health", async () => {
     return {
-      status: "ok"
+      status: "ok",
     };
   });
 
@@ -13,19 +13,16 @@ export async function healthRoutes(app) {
 
       return {
         status: "ready",
-        database: "connected"
+        database: "connected",
       };
     } catch (error) {
-      request.log.error(
-        { err: error },
-        "Database readiness check failed"
-      );
+      request.log.error({ err: error }, "Database readiness check failed");
 
       reply.code(503);
 
       return {
         status: "not_ready",
-        database: "disconnected"
+        database: "disconnected",
       };
     }
   });

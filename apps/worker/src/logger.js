@@ -23,7 +23,7 @@ export const logger = {
         message,
         ...getTraceMeta(),
         ...meta,
-      })
+      }),
     );
   },
 
@@ -36,7 +36,7 @@ export const logger = {
         message,
         ...getTraceMeta(),
         ...meta,
-      })
+      }),
     );
   },
 
@@ -49,7 +49,7 @@ export const logger = {
         message,
         ...getTraceMeta(),
         ...meta,
-      })
+      }),
     );
   },
 
@@ -62,7 +62,7 @@ export const logger = {
         message,
         ...getTraceMeta(),
         ...meta,
-      })
+      }),
     );
   },
 };

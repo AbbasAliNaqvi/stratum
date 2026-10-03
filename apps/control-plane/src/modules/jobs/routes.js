@@ -59,7 +59,10 @@ export async function jobRoutes(app) {
     } catch (error) {
       request.log.error(error);
 
-      if (error.code === "NODE_NOT_REGISTERED" || error.code === "INVALID_STATE_TRANSITION") {
+      if (
+        error.code === "NODE_NOT_REGISTERED" ||
+        error.code === "INVALID_STATE_TRANSITION"
+      ) {
         return reply.code(409).send({
           error: error.message,
         });
