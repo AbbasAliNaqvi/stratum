@@ -1,6 +1,8 @@
-# Stratum
+# STRATUM
 
-Distributed backend control plane for service orchestration, observability, intelligent diagnostics, and automated remediation.
+## Automation & Orchestration Platform
+
+STRATUM is a developer automation and orchestration platform for running tasks, coordinating multi-step workflows, scheduling recurring execution, and reliably executing work across distributed workers.
 
 ## Documentation
 

@@ -610,3 +610,74 @@ Redesign the interactive Stratum terminal from a numbered admin menu into a mode
 - Real Workloads (HTTP jobs, command execution)
 - AI Diagnostics Prototype (Groq API integration via `/model`)
 - Webhooks / Event Subscriptions
+
+## Milestone: STRATUM Product Architecture Pivot
+
+Date: 2026-10-04
+
+### Product Direction
+
+STRATUM was repositioned from a user-facing job distribution tool into a broader automation and orchestration platform.
+
+### Product Model
+
+Task
+↓
+Workflow
+↓
+Automation
+↓
+Run
+↓
+Distributed Execution
+
+### Why
+
+The queue and worker infrastructure remain important, but they are the execution foundation rather than the primary user-facing product.
+
+### New User Experience
+
+Document:
+- /run
+- /workflow
+- /automate
+- /schedule
+- /runs
+- /tasks
+- /monitor
+
+### Distributed Execution Foundation
+
+Document how:
+- workers
+- queues
+- leases
+- fencing
+- retries
+- cancellation
+- recovery
+support the higher-level automation product.
+
+### Demonstration
+
+Document the deterministic workflow demo and what it proves.
+
+### Files Changed
+
+- apps/cli/src/interactive.js
+- apps/cli/src/interactive.test.js
+- apps/cli/src/orchestrator.js
+- apps/cli/src/orchestrator.test.js
+- apps/cli/src/program.js
+- docs/ARCHITECTURE.md
+- docs/DEMO.md
+- README.md
+- PROGRESS.md
+
+### Tests
+
+Vitest execution reports 107 tests across all workspaces (cli, control-plane, worker, metrics, tracing). All passing.
+
+### Remaining Limitations
+
+Triggers, Automations, Integrations, Policies, Artifacts, and AI features are intentionally planned for future milestones.

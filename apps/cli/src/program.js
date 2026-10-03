@@ -20,6 +20,19 @@ export function createProgram({ client } = {}) {
     await runDashboard(resolvedClient);
   });
 
+  program
+    .command("demo")
+    .description("Run the deterministic Data Processing Pipeline demo")
+    .action(async () => {
+      // Import dynamically to avoid top-level dependency if not used
+      const { cmdDemo } = await import("./interactive.js");
+      const { Orchestrator } = await import("./orchestrator.js");
+      const orchestrator = new Orchestrator(resolvedClient);
+      await cmdDemo(resolvedClient, null, orchestrator);
+      orchestrator.destroy();
+      process.exit(0);
+    });
+
   registerJobCommands(program, {
     client: resolvedClient,
   });
