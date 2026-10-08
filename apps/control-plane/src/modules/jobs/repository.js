@@ -97,6 +97,24 @@ export async function getJobEvents(jobId) {
     .orderBy(asc(jobEvents.createdAt));
 }
 
+export async function listAllJobEvents(limit = 100) {
+  return db
+    .select({
+      id: jobEvents.id,
+      jobId: jobEvents.jobId,
+      eventType: jobEvents.eventType,
+      nodeId: jobEvents.nodeId,
+      message: jobEvents.message,
+      createdAt: jobEvents.createdAt,
+      jobType: jobs.type,
+      traceparent: jobs.traceparent,
+    })
+    .from(jobEvents)
+    .leftJoin(jobs, eq(jobEvents.jobId, jobs.id))
+    .orderBy(desc(jobEvents.createdAt))
+    .limit(limit);
+}
+
 export async function getJobByIdempotencyKey(idempotencyKey) {
   const [job] = await db
     .select()

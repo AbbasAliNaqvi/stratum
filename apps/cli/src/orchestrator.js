@@ -403,13 +403,14 @@ export class Orchestrator {
   }
 
   /** Execute a workflow */
-  async submitWorkflow(workflow, { maxRetries = 3, onProgress, inputs = {}, signal } = {}) {
+  async submitWorkflow(workflow, { maxRetries = 3, onProgress, inputs = {}, signal, runId } = {}) {
     const errors = workflow.validate();
     if (errors.length > 0) {
       throw new Error(`Invalid workflow: ${errors.join(", ")}`);
     }
 
     const run = new Run({
+      id: runId,
       name: workflow.name,
       type: "workflow",
       tasks: workflow.steps.map((s) => ({
@@ -429,6 +430,7 @@ export class Orchestrator {
 
     this.runs.set(run.id, run);
     run.status = "running";
+    if (runId) this.client.updateRunStatus(runId, { status: "running" }).catch(() => {});
 
     // Execute the DAG
     const completed = new Set();
@@ -509,6 +511,7 @@ export class Orchestrator {
           });
           task.jobId = result.job.id;
           task.status = result.job.status;
+          if (runId) this.client.linkRunStep(runId, task.taskId, result.job.id).catch(() => {});
           if (onProgress) onProgress(run);
         } catch (e) {
           task.status = "failed";
@@ -537,6 +540,7 @@ export class Orchestrator {
             const check = await this.client.getJob(task.jobId);
             task.status = check.job.status;
             if (check.job.workerId) task.workerId = check.job.workerId;
+            if (check.job.retryCount !== undefined) task.retryCount = check.job.retryCount;
 
             if (check.job.status === "succeeded") {
               task.result = check.job.result;
@@ -573,6 +577,15 @@ export class Orchestrator {
     }
 
     run.finishedAt = new Date().toISOString();
+    
+    if (runId) {
+      this.client.updateRunStatus(runId, {
+        status: run.status,
+        result: run.result,
+        error: run.error
+      }).catch(() => {});
+    }
+
     if (onProgress) onProgress(run);
 
     return run;

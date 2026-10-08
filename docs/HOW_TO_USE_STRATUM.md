@@ -1,8 +1,6 @@
 # How to Use Stratum
 
-Run reliable distributed jobs without manually managing workers, leases, retries, and job state.
-
-Stratum is a distributed job execution engine. You submit a job, Stratum puts it in a queue, a worker executes it, and the control plane safely tracks its state from start to finish.
+**Stratum** is an Automation and Orchestration Platform that lets you run, schedule, and coordinate multi-step workflows across distributed resources safely and reliably.
 
 ---
 
@@ -19,10 +17,10 @@ npm link
 stratum init
 ```
 *(This command will:
-1. Verify you are running Node 22+.
+1. Verify you are running Node 20+.
 2. Check for a local `.env` and create one with safe defaults if missing (targeting a local `stratum` PostgreSQL database).
-3. Safely auto-provision the `stratum` PostgreSQL database if it is missing (without dropping existing databases).
-4. Apply database migrations to the target database, preserving any existing data.
+3. Safely auto-provision the `stratum` PostgreSQL database if it is missing.
+4. Apply database migrations to the target database.
 5. Start the background Control Plane and wait for it to become reachable.
 6. Start the Worker and wait for it to register to the Control Plane.)*
 
@@ -30,17 +28,17 @@ stratum init
 ```bash
 stratum
 ```
-This opens the **Stratum Console** — a persistent interactive terminal where you type slash commands to manage distributed work.
+This opens the **Stratum Console** — a persistent interactive terminal where you type slash commands to manage automations and work.
 
 ```text
 ╭────────────────────────────────────────────────────────╮
 │ STRATUM                                                │
-│ Distributed Work Control Console                       │
+│ Automation & Orchestration                             │
 │                                                        │
 │ ● healthy  ·  1 worker  ·  0 queued  ·  0 running     │
 ╰────────────────────────────────────────────────────────╯
 
-  Type /help for commands, /work to run work
+  Type /help for commands, /automate to build workflows
 
 ›
 ```
@@ -48,13 +46,13 @@ This opens the **Stratum Console** — a persistent interactive terminal where y
 **4. Your first commands**
 ```text
 › /help              Show available commands
-› /work              Submit a job interactively
-› /jobs              View recent jobs
+› /automate          Create a new automation workflow
+› /run               Run an automation or single task
+› /runs              View execution history
+› /schedules         Manage scheduled automations
 › /status            System health overview
 › /workers           See active workers
 › /doctor            Diagnose problems
-› /config            View runtime configuration
-› /model             AI model configuration (future)
 › /clear             Clear screen
 › /quit              Exit
 ```

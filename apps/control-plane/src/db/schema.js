@@ -158,3 +158,44 @@ export const jobEvents = pgTable(
 
   (table) => [index("job_events_job_id_idx").on(table.jobId, table.createdAt)],
 );
+
+export const automations = pgTable("automations", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  definition: jsonb("definition").notNull(),
+  enabled: integer("enabled").notNull().default(1),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const automationRuns = pgTable("automation_runs", {
+  id: text("id").primaryKey(),
+  automationId: text("automation_id").notNull().references(() => automations.id, { onDelete: 'cascade' }),
+  status: text("status").notNull().default("queued"),
+  input: jsonb("input"),
+  result: jsonb("result"),
+  error: jsonb("error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+});
+
+export const automationRunSteps = pgTable("automation_run_steps", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull().references(() => automationRuns.id, { onDelete: 'cascade' }),
+  stepId: text("step_id").notNull(),
+  jobId: uuid("job_id").references(() => jobs.id, { onDelete: 'set null' }),
+});
+
+export const schedules = pgTable("schedules", {
+  id: text("id").primaryKey(),
+  automationId: text("automation_id").notNull().references(() => automations.id, { onDelete: 'cascade' }),
+  type: text("type").notNull().default("interval"),
+  intervalMs: integer("interval_ms").notNull(),
+  enabled: integer("enabled").notNull().default(1),
+  nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

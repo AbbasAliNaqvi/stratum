@@ -2,7 +2,7 @@
   "name": "stratum",
   "version": "0.1.0",
   "private": true,
-  "description": "A distributed backend control plane with observability, AI-powered diagnostics and self-healing.",
+  "description": "STRATUM — AI-Native Automation & Orchestration Platform",
   "type": "module",
   "workspaces": [
     "apps/*",
@@ -13,6 +13,8 @@
   },
   "scripts": {
     "dev": "npm run dev --workspace=@stratum/control-plane",
+    "dev:web": "npm run dev --workspace=@stratum/web",
+    "build:web": "npm run build --workspace=@stratum/web",
     "start": "npm run start --workspace=@stratum/control-plane",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces",
@@ -22,7 +24,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=20"
   },
   "dependencies": {
     "commander": "^14.0.3",

@@ -7,11 +7,18 @@ import {
   requestJobCancellation,
   acknowledgeJobCancellation,
   renewJobLease,
+  getEventsForJob,
+  getAllEvents,
 } from "./service.js";
 
 import { config } from "../../config.js";
 
 export async function jobRoutes(app) {
+  app.get("/events", async (request, reply) => {
+    const limit = request.query.limit ? parseInt(request.query.limit, 10) : 100;
+    const events = await getAllEvents(limit);
+    return reply.send({ events });
+  });
   app.post("/jobs", async (request, reply) => {
     try {
       const job = await createJob(request.body);
@@ -167,6 +174,11 @@ export async function jobRoutes(app) {
     }
 
     return reply.send(job);
+  });
+
+  app.get("/jobs/:id/events", async (request, reply) => {
+    const events = await getEventsForJob(request.params.id);
+    return reply.send({ events });
   });
 
   app.post("/jobs/:id/cancel/acknowledge", async (request, reply) => {

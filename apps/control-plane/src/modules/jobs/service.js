@@ -2,6 +2,7 @@ import {
   createJobWithEvent,
   getJobById,
   getJobEvents,
+  listAllJobEvents,
   getJobByIdempotencyKey,
   listJobs,
   claimNextJob as claimNextJobRepository,
@@ -349,4 +350,12 @@ export async function renewJobLease(input) {
     );
   }
   return job;
+}
+
+export async function getEventsForJob(jobId) {
+  return await getJobEvents(jobId);
+}
+
+export async function getAllEvents(limit) {
+  return await listAllJobEvents(limit);
 }

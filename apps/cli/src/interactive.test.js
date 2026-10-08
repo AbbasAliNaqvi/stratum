@@ -88,6 +88,9 @@ describe("interactive console commands", () => {
     it("has expected commands", () => {
       const names = COMMANDS.map((c) => c.name);
       expect(names).toContain("/run");
+      expect(names).toContain("/automations");
+      expect(names).toContain("/automate");
+      expect(names).toContain("/about");
       expect(names).toContain("/workflow");
       expect(names).toContain("/schedule");
       expect(names).toContain("/demo");

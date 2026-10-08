@@ -117,6 +117,76 @@ export function createClient() {
       return request("/health");
     },
 
+    async createAutomation(data) {
+      return request("/automations", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+    },
+
+    async getAutomations() {
+      return request("/automations");
+    },
+
+    async getAutomation(id) {
+      return request(`/automations/${encodeURIComponent(id)}`);
+    },
+
+    async createRun(automationId, input = {}) {
+      return request(`/automations/${encodeURIComponent(automationId)}/runs`, {
+        method: "POST",
+        body: JSON.stringify({ input }),
+      });
+    },
+
+    async getRuns(automationId) {
+      const path = automationId 
+        ? `/automations/${encodeURIComponent(automationId)}/runs`
+        : "/runs";
+      return request(path);
+    },
+
+    async getRun(id) {
+      return request(`/runs/${encodeURIComponent(id)}`);
+    },
+
+    async cancelRun(id) {
+      return request(`/runs/${encodeURIComponent(id)}/cancel`, {
+        method: "POST",
+      });
+    },
+
+    async updateRunStatus(id, data) {
+      return request(`/runs/${encodeURIComponent(id)}/status`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+    },
+
+    async linkRunStep(id, stepId, jobId) {
+      return request(`/runs/${encodeURIComponent(id)}/steps`, {
+        method: "POST",
+        body: JSON.stringify({ stepId, jobId }),
+      });
+    },
+
+    async createSchedule(data) {
+      return request("/schedules", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+    },
+
+    async getSchedules() {
+      return request("/schedules");
+    },
+
+    async removeSchedule(id) {
+      return request(`/schedules/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+    },
+
     baseUrl: config.CONTROL_PLANE_URL,
   };
 }

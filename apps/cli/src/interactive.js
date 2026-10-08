@@ -46,7 +46,7 @@ import {
   Schedule,
   createDemoWorkflow,
 } from "./orchestrator.js";
-import { getAutomations, getAutomation } from "./automation.js";
+
 
 /* ── Command registry ──────────────────────────────────── */
 
@@ -361,20 +361,186 @@ export function inlinePrompt(rl, label, defaultVal) {
   });
 }
 
+function cmdAbout() {
+  heading("STRATUM");
+  console.log(`  Automation & Orchestration Platform`);
+  console.log("");
+  console.log(`  ${c.bold}What it does${c.reset}`);
+  console.log(`  Build automated processes from tasks.`);
+  console.log(`  Run independent work in parallel.`);
+  console.log(`  Schedule recurring execution.`);
+  console.log(`  Monitor runs.`);
+  console.log(`  Retry and recover failures.`);
+  console.log("");
+  console.log(`  ${c.bold}How it works${c.reset}`);
+  console.log(`  Automation`);
+  console.log(`      ↓`);
+  console.log(`  Workflow`);
+  console.log(`      ↓`);
+  console.log(`  Run`);
+  console.log(`      ↓`);
+  console.log(`  Distributed execution`);
+  console.log(`      ↓`);
+  console.log(`  Workers`);
+  console.log(`      ↓`);
+  console.log(`  Result`);
+}
+
+/* ── /automate command ─────────────────────────────────── */
+
+async function cmdAutomate(client, rl) {
+  heading("Create Automation");
+
+  const name = await inlinePrompt(rl, "Automation name", "My Automation");
+  if (!name) return;
+
+  const description = await inlinePrompt(rl, "Description", "");
+  if (description === null) return;
+
+  const steps = [];
+  let adding = true;
+
+  while (adding) {
+    const stepNum = steps.length + 1;
+    console.log(`\n  ${c.bold}Add step ${stepNum}?${c.reset}`);
+    
+    const userTypes = Object.entries(TASK_TYPES).filter((e) => !e[1].internal);
+    const typeKeys = userTypes.map((e) => e[0]);
+    const typeLabels = userTypes.map((e) => `${e[1].icon}  ${e[1].name}`);
+
+    const selectedType = await interactiveSelect("Task type", [...typeKeys, "cancel"], {
+      labels: [...typeLabels, "Stop adding steps"],
+    });
+
+    if (!selectedType || selectedType === "cancel") {
+      if (steps.length === 0) {
+        dim("  Cancelled.");
+        return;
+      }
+      adding = false;
+      break;
+    }
+
+    const taskDef = TASK_TYPES[selectedType];
+    const stepId = await inlinePrompt(rl, "Step ID", `step-${stepNum}`);
+    if (!stepId) return;
+
+    const payload = {};
+    for (const field of taskDef.fields) {
+      const value = await inlinePrompt(rl, field.label, field.default || "");
+      if (value === null) return;
+      payload[field.name] = field.transform ? field.transform(value) : value;
+    }
+
+    let dependsOn = [];
+    if (steps.length > 0) {
+      const available = steps.map((s) => s.id).join(", ");
+      dim(`  Available: ${available}`);
+      const depInput = await inlinePrompt(rl, "Depends on", steps[steps.length - 1].id);
+      if (depInput === null) return;
+      if (depInput) {
+        dependsOn = depInput.split(",").map((d) => d.trim()).filter(Boolean);
+      }
+    }
+
+    steps.push({ id: stepId, type: selectedType, payload, dependsOn });
+    success(`  Added: ${stepId}`);
+  }
+
+  console.log("");
+  const confirm = await inlinePrompt(rl, "Save automation?", "y");
+  if (confirm === null || confirm.toLowerCase() !== "y") {
+    dim("  Cancelled.");
+    return;
+  }
+
+  const spinner = createSpinner("Saving...");
+  spinner.start();
+  try {
+    const res = await client.createAutomation({
+      name,
+      description,
+      definition: { steps }
+    });
+    spinner.stop(`${c.green}${sym.check}${c.reset} Automation created\n  ID: ${res.automation.id}`);
+  } catch (e) {
+    spinner.stop(`${c.red}${sym.cross}${c.reset} Failed to save: ${e.message}`);
+  }
+}
+
 /* ── /automations command ──────────────────────────────── */
 
-function cmdAutomations() {
+async function cmdAutomations(client, rl, orchestrator) {
   heading("Automations");
-  const automations = getAutomations();
-  for (const a of automations) {
-    console.log(`  ${c.bold}${a.name.padEnd(24)}${c.reset} ${c.green}ready${c.reset}`);
-    console.log(`  ${c.dim}${a.description}${c.reset}\n`);
+  
+  let data;
+  try {
+    data = await client.getAutomations();
+  } catch (e) {
+    error(`Failed to fetch automations: ${e.message}`);
+    return;
+  }
+  
+  const automations = data.automations || [];
+  
+  if (automations.length === 0) {
+    dim("  No automations available.");
+    console.log(`\n  ${c.dim}Create one with /automate${c.reset}`);
+    return;
+  }
+  
+  const autoKeys = automations.map(a => a.id);
+  const autoLabels = automations.map(a => `${a.name.padEnd(24)} ${c.dim}${a.description || ''}${c.reset}`);
+  
+  const selectedId = await interactiveSelect(
+    "Automations",
+    autoKeys,
+    { labels: autoLabels }
+  );
+  
+  if (!selectedId) return;
+  
+  let automationRes;
+  try {
+    automationRes = await client.getAutomation(selectedId);
+  } catch (e) {
+    error(`Failed to fetch automation: ${e.message}`);
+    return;
+  }
+  
+  const automation = automationRes.automation;
+  
+  console.log("");
+  console.log(`  ${c.bold}${automation.name}${c.reset}`);
+  console.log("");
+  console.log(`  ${c.dim}Description${c.reset}`);
+  console.log(`  ${automation.description || 'none'}`);
+  console.log("");
+  
+  console.log(`  ${c.dim}Steps${c.reset}`);
+  const dag = automation.definition?.steps || [];
+  for (let i = 0; i < dag.length; i++) {
+    const s = dag[i];
+    console.log(`  ${s.id}`);
+    if (i < dag.length - 1) {
+      console.log(`      ↓`);
+    }
+  }
+  console.log("");
+  
+  const action = await interactiveSelect("Action", ["run", "dry-run"], { labels: ["Run", "Dry run"] });
+  if (!action) return;
+  
+  if (action === "dry-run") {
+    await cmdRun(client, rl, orchestrator, "--dry-run");
+  } else {
+    await cmdRun(client, rl, orchestrator, "");
   }
 }
 
 /* ── /run command ──────────────────────────────────────── */
 
-async function cmdRun(client, rl, orchestrator, args) {
+async function cmdRun(client, rl, orchestrator, args = "") {
   const isDryRun = args.includes("--dry-run");
 
   const runChoice = await interactiveSelect(
@@ -386,9 +552,21 @@ async function cmdRun(client, rl, orchestrator, args) {
   if (!runChoice) return;
 
   if (runChoice === "automation") {
-    const automations = getAutomations();
+    let data;
+    try {
+      data = await client.getAutomations();
+    } catch (e) {
+      error(`Failed to fetch automations: ${e.message}`);
+      return;
+    }
+    const automations = data.automations || [];
+    if (automations.length === 0) {
+      error("No automations available.");
+      return;
+    }
+
     const autoKeys = automations.map(a => a.id);
-    const autoLabels = automations.map(a => `${a.name.padEnd(24)} ${c.dim}${a.description}${c.reset}`);
+    const autoLabels = automations.map(a => `${a.name.padEnd(24)} ${c.dim}${a.description || ''}${c.reset}`);
     
     const selectedId = await interactiveSelect(
       "Choose automation",
@@ -397,26 +575,27 @@ async function cmdRun(client, rl, orchestrator, args) {
     );
     if (!selectedId) return;
 
-    const automation = getAutomation(selectedId);
-    
-    // Collect inputs
-    const inputs = {};
-    if (automation.inputs.length > 0) {
-      console.log(`\n  ${c.bold}${automation.name}${c.reset}`);
-      for (const input of automation.inputs) {
-        const val = await inlinePrompt(rl, input.label, input.default);
-        if (val === null) return;
-        inputs[input.name] = val;
-      }
+    let automationRes;
+    try {
+      automationRes = await client.getAutomation(selectedId);
+    } catch (e) {
+      error(`Failed to fetch automation: ${e.message}`);
+      return;
     }
+    const automation = automationRes.automation;
+    
+    // For now we don't have defined inputs on the automation model since they are dynamic, 
+    // but we can prompt for any needed inputs if we had a schema. Let's just pass empty inputs.
+    const inputs = {};
 
     if (isDryRun) {
       console.log("");
       heading("Execution Plan");
-      automation.steps.forEach((s, i) => {
+      const steps = automation.definition?.steps || [];
+      steps.forEach((s, i) => {
         console.log(`  ${i+1}. ${s.id} ${c.dim}(${s.type})${c.reset}`);
       });
-      console.log(`\n  1 workflow\n  ${automation.steps.length} steps\n  0 running\n\n  Nothing executed.`);
+      console.log(`\n  1 workflow\n  ${steps.length} steps\n  0 running\n\n  Nothing executed.`);
       return;
     }
 
@@ -425,15 +604,29 @@ async function cmdRun(client, rl, orchestrator, args) {
       dim("  Cancelled.");
       return;
     }
+    
+    // We create the run in the API
+    let runRes;
+    try {
+      runRes = await client.createRun(automation.id, inputs);
+    } catch (e) {
+      error(`Failed to create run: ${e.message}`);
+      return;
+    }
 
     const workflow = new Workflow({
       name: automation.name,
-      steps: automation.steps
+      steps: automation.definition?.steps || []
     });
+    
+    // We want orchestrator to execute this workflow, but we should pass the runId 
+    // so it updates the DB instead of just in-memory.
 
     const startTime = Date.now();
+
     const run = await orchestrator.submitWorkflow(workflow, {
       inputs,
+      runId: runRes.run.id,
       onProgress: (r) => {
         for (const task of r.tasks) {
           if (task.status !== "pending" && !task._displayed) {
@@ -647,26 +840,34 @@ async function cmdWorkflow(client, rl, orchestrator) {
     const taskDef = TASK_TYPES[selectedType];
 
     // Collect payload
+    let cancelled = false;
     const payload = {};
     for (const field of taskDef.fields) {
       const value = await inlinePrompt(rl, field.label, field.default || "");
-      if (value === null) break;
+      if (value === null) {
+        cancelled = true;
+        break;
+      }
       payload[field.name] = field.transform ? field.transform(value) : value;
     }
+    
+    if (cancelled) return;
 
     // Assign step ID
     const stepId = await inlinePrompt(rl, "Step ID", `step-${stepNum}`);
-    if (stepId === null) break;
+    if (stepId === null) return;
 
     // Dependencies
     let dependsOn = [];
     if (steps.length > 0) {
+      const available = steps.map((s) => s.id).join(", ");
+      dim(`  Available dependencies: ${available}`);
       const depInput = await inlinePrompt(
         rl,
-        `Depends on (${steps.map((s) => s.id).join(", ")})`,
+        `Depends on`,
         steps[steps.length - 1].id,
       );
-      if (depInput === null) break;
+      if (depInput === null) return;
       if (depInput) {
         dependsOn = depInput.split(",").map((d) => d.trim()).filter(Boolean);
       }
@@ -676,7 +877,8 @@ async function cmdWorkflow(client, rl, orchestrator) {
     success(`  Added: ${taskDef.icon}  ${stepId} (${taskDef.name})`);
 
     const more = await inlinePrompt(rl, "Add another step?", "y");
-    if (more === null || more.toLowerCase() === "n" || more.toLowerCase() === "no") {
+    if (more === null) return;
+    if (more.toLowerCase() === "n" || more.toLowerCase() === "no") {
       adding = false;
     }
   }
@@ -756,7 +958,7 @@ async function cmdWorkflow(client, rl, orchestrator) {
 /* ── /schedule command ─────────────────────────────────── */
 
 async function cmdSchedule(client, rl, orchestrator) {
-  heading(`Schedule ${c.dim}(in-memory preview)${c.reset}`);
+  heading(`Schedule`);
   const action = await interactiveSelect("What would you like to do?", [
     "create",
     "list",
@@ -772,7 +974,14 @@ async function cmdSchedule(client, rl, orchestrator) {
   if (!action) return;
 
   if (action === "list") {
-    const schedules = orchestrator.listSchedules();
+    let data;
+    try {
+      data = await client.getSchedules();
+    } catch (e) {
+      error(`Failed to fetch schedules: ${e.message}`);
+      return;
+    }
+    const schedules = data.schedules || [];
     if (schedules.length === 0) {
       dim("  No active schedules.");
       console.log(`\n  ${c.dim}Create one with /schedule${c.reset}`);
@@ -780,7 +989,7 @@ async function cmdSchedule(client, rl, orchestrator) {
     }
     heading("Active Schedules");
     const rows = schedules.map((s) => [
-      statusDot(s.enabled),
+      statusDot(s.enabled === 1 || s.enabled === true),
       s.name,
       s.type === "automation" ? s.automationId : s.taskType,
       s.intervalMs ? `every ${s.intervalMs / 1000}s` : s.cron || "—",
@@ -791,7 +1000,14 @@ async function cmdSchedule(client, rl, orchestrator) {
   }
 
   if (action === "remove") {
-    const schedules = orchestrator.listSchedules();
+    let data;
+    try {
+      data = await client.getSchedules();
+    } catch (e) {
+      error(`Failed to fetch schedules: ${e.message}`);
+      return;
+    }
+    const schedules = data.schedules || [];
     if (schedules.length === 0) {
       dim("  No schedules to remove.");
       return;
@@ -804,8 +1020,12 @@ async function cmdSchedule(client, rl, orchestrator) {
       labels,
     });
     if (!selected) return;
-    orchestrator.removeSchedule(selected);
-    success(`Schedule removed.`);
+    try {
+      await client.removeSchedule(selected);
+      success(`Schedule removed.`);
+    } catch (e) {
+      error(`Failed to remove schedule: ${e.message}`);
+    }
     return;
   }
 
@@ -826,9 +1046,20 @@ async function cmdSchedule(client, rl, orchestrator) {
   let displayTarget = "";
 
   if (targetChoice === "automation") {
-    const automations = getAutomations();
+    let data;
+    try {
+      data = await client.getAutomations();
+    } catch (e) {
+      error(`Failed to fetch automations: ${e.message}`);
+      return;
+    }
+    const automations = data.automations || [];
+    if (automations.length === 0) {
+      error("No automations available.");
+      return;
+    }
     const autoKeys = automations.map(a => a.id);
-    const autoLabels = automations.map(a => `${a.name.padEnd(24)} ${c.dim}${a.description}${c.reset}`);
+    const autoLabels = automations.map(a => `${a.name.padEnd(24)} ${c.dim}${a.description || ''}${c.reset}`);
     
     const selectedId = await interactiveSelect(
       "Choose automation",
@@ -837,20 +1068,21 @@ async function cmdSchedule(client, rl, orchestrator) {
     );
     if (!selectedId) return;
 
-    const automation = getAutomation(selectedId);
+    let automationRes;
+    try {
+      automationRes = await client.getAutomation(selectedId);
+    } catch (e) {
+      error(`Failed to fetch automation: ${e.message}`);
+      return;
+    }
+    const automation = automationRes.automation;
     scheduleDef.automationId = selectedId;
     displayTarget = automation.name;
     
     // Collect inputs
     const inputs = {};
-    if (automation.inputs.length > 0) {
-      console.log(`\n  ${c.bold}${automation.name}${c.reset}`);
-      for (const input of automation.inputs) {
-        const val = await inlinePrompt(rl, input.label, input.default);
-        if (val === null) return;
-        inputs[input.name] = val;
-      }
-    }
+    // As mentioned earlier, inputs would be driven by a schema if we had one.
+    // Assuming empty inputs for now.
     scheduleDef.inputs = inputs;
   } else {
     const userTypes = Object.entries(TASK_TYPES).filter((e) => !e[1].internal);
@@ -883,19 +1115,21 @@ async function cmdSchedule(client, rl, orchestrator) {
   }
 
   scheduleDef.intervalMs = intervalMs;
-  const schedule = orchestrator.addSchedule(
-    new Schedule(scheduleDef),
-    getAutomation
-  );
-
-  success(`Schedule created: "${name}"`);
-  console.log(
-    kvPanel([
-      ["Target", displayTarget],
-      ["Interval", `every ${intervalMs / 1000}s`],
-      ["Next run", schedule.nextRunAt || "—"],
-    ]),
-  );
+  let schedule;
+  try {
+    const res = await client.createSchedule(scheduleDef);
+    schedule = res.schedule;
+    success(`Schedule created: "${name}"`);
+    console.log(
+      kvPanel([
+        ["Target", displayTarget],
+        ["Interval", `every ${intervalMs / 1000}s`],
+        ["Next run", schedule.nextRunAt || "—"],
+      ]),
+    );
+  } catch (e) {
+    error(`Failed to create schedule: ${e.message}`);
+  }
 }
 
 /* ── /demo command ─────────────────────────────────────── */
@@ -934,6 +1168,12 @@ export async function cmdDemo(client, rl, orchestrator) {
   console.log(`  ${c.dim}      validate${c.reset}`);
   console.log(`  ${c.dim}          ↓${c.reset}`);
   console.log(`  ${c.dim}   generate-report${c.reset}`);
+  console.log("");
+
+  const state = await fetchState(client);
+  console.log(`  ${c.bold}Workers available: ${state.workerCount}${c.reset}`);
+  console.log(`  Independent tasks are submitted concurrently.`);
+  console.log(`  The execution engine schedules them across available workers.`);
   console.log("");
 
   if (rl) {
@@ -1007,6 +1247,11 @@ export async function cmdDemo(client, rl, orchestrator) {
       api3Result = "healthy after retry";
     }
 
+    let retryOutput = "0";
+    if (api3Task && api3Task.retryCount > 0) {
+      retryOutput = `${api3Task.retryCount} (${api3Task.status === 'succeeded' ? 'recovered' : 'failed'})`;
+    }
+
     const state = await fetchState(client);
     console.log(
       box([
@@ -1017,7 +1262,7 @@ export async function cmdDemo(client, rl, orchestrator) {
         `  ${api2Task?.status === 'succeeded' ? c.green + sym.check + ' api-2 healthy' : c.red + sym.cross + ' api-2 failed'}${c.reset}`,
         `  ${api3Result === 'failed' ? c.red + sym.cross + ' api-3 failed' : c.green + sym.check + ' api-3 ' + api3Result}${c.reset}`,
         "",
-        `Retries        ${api3Result === 'failed' ? '3 (failed)' : '1 (recovered)'}`,
+        `Retries        ${retryOutput}`,
         `Workers        ${state.workerCount}`,
         `Duration       ${(elapsed / 1000).toFixed(1)}s`,
       ]),
@@ -1028,8 +1273,16 @@ export async function cmdDemo(client, rl, orchestrator) {
 /* ── /runs command ─────────────────────────────────────── */
 
 async function cmdRuns(client, args, rl, orchestrator) {
-  heading(`Runs ${c.dim}(in-memory preview)${c.reset}`);
-  const runs = orchestrator.listRuns();
+  heading(`Runs`);
+  
+  let data;
+  try {
+    data = await client.getRuns();
+  } catch (e) {
+    error(`Failed to fetch runs: ${e.message}`);
+    return;
+  }
+  const runs = data.runs || [];
 
   if (runs.length === 0) {
     dim("  No executions yet.");
@@ -1039,7 +1292,7 @@ async function cmdRuns(client, args, rl, orchestrator) {
 
   const runChoices = runs.map(r => r.id);
   const runLabels = runs.map(r => 
-    `${statusIcon(r.status)} ${r.id.substring(0, 8)}… ${r.name.padEnd(24)} ${r.status}`
+    `${statusIcon(r.status)} ${r.id.substring(0, 8)}… ${r.status}`
   );
 
   const selectedRunId = await interactiveSelect(
@@ -1050,34 +1303,35 @@ async function cmdRuns(client, args, rl, orchestrator) {
 
   if (!selectedRunId) return;
 
-  const run = orchestrator.getRun(selectedRunId);
-  const duration = run.finishedAt 
-    ? new Date(run.finishedAt) - new Date(run.createdAt)
+  let runRes;
+  try {
+    runRes = await client.getRun(selectedRunId);
+  } catch(e) {
+    error(`Failed to fetch run: ${e.message}`);
+    return;
+  }
+  const run = runRes.run;
+  const duration = run.completedAt 
+    ? new Date(run.completedAt) - new Date(run.createdAt)
     : Date.now() - new Date(run.createdAt);
 
   console.log(`\n${c.bold}Run ${run.id.substring(0, 8)}…${c.reset}\n`);
   
   console.log(kvPanel([
-    ["Automation", run.name],
+    ["Automation ID", run.automationId],
     ["Status", run.status],
     ["Started", new Date(run.createdAt).toLocaleString()],
     ["Duration", formatDuration(duration)]
   ]));
 
-  console.log(`\n${c.bold}Execution${c.reset}\n`);
-  for (const task of run.tasks) {
-    console.log(`  ${statusIcon(task.status)} ${task.taskId}`);
+  console.log(`\n${c.bold}Steps Linked to Jobs${c.reset}\n`);
+  let hasSteps = false;
+  for (const step of (run.steps || [])) {
+    console.log(`  ${step.stepId.padEnd(14)} ${c.dim}Job ID: ${step.jobId}${c.reset}`);
+    hasSteps = true;
   }
-
-  console.log(`\n${c.bold}Workers${c.reset}\n`);
-  let hasWorkers = false;
-  for (const task of run.tasks) {
-    if (task.workerId) {
-      console.log(`  ${task.taskId.padEnd(14)} ${task.workerId}`);
-      hasWorkers = true;
-    }
-  }
-  if (!hasWorkers) dim("  No worker data.");
+  
+  if (!hasSteps) dim("  No steps data.");
   console.log("");
 }
 
@@ -1191,9 +1445,18 @@ async function cmdStatus(client, orchestrator) {
     } catch {}
   }
 
-  const runs = orchestrator.listRuns();
-  const activeRuns = runs.filter((r) => !r.isComplete).length;
-  const schedules = orchestrator.listSchedules();
+  let runs = [];
+  let schedules = [];
+  try {
+    const [runsRes, schedRes] = await Promise.all([
+      client.getRuns().catch(() => ({ runs: [] })),
+      client.getSchedules().catch(() => ({ schedules: [] }))
+    ]);
+    runs = runsRes.runs || [];
+    schedules = schedRes.schedules || [];
+  } catch (e) {}
+  
+  const activeRuns = runs.filter((r) => !['succeeded', 'failed', 'cancelled'].includes(r.status)).length;
 
   const entries = [
     [
@@ -1241,23 +1504,32 @@ async function cmdMonitor() {
       for (const line of tail) {
         try {
           const parsed = JSON.parse(line);
-          const time = shortTime(parsed.timestamp || parsed.time);
-          const msg = parsed.msg || parsed.message || "";
+          const date = new Date(parsed.timestamp || parsed.time || Date.now());
+          const time = date.toLocaleTimeString('en-US', { hour12: false });
+          let msg = parsed.msg || parsed.message || "";
+          
+          if (typeof msg === "object") {
+            // Check if it's an error object or just a plain object
+            if (msg.message) msg = msg.message;
+            else msg = JSON.stringify(msg);
+          }
+          
           const level = parsed.level || "";
           const icon =
             level === "error"
               ? `${c.red}${sym.cross}${c.reset}`
               : level === "warn"
                 ? `${c.yellow}!${c.reset}`
-                : `${c.dim}${sym.dot}${c.reset}`;
+                : `${c.cyan}●${c.reset}`;
+          
           lines.push({
-            ts: parsed.timestamp || parsed.time || "",
-            display: `  ${c.dim}${time}${c.reset}  ${icon}  ${c.dim}${label}${c.reset}  ${msg}`,
+            ts: date.getTime(),
+            display: `${time}  ${icon} ${label.padEnd(8)} ${msg}`,
           });
         } catch {
           lines.push({
-            ts: "",
-            display: `  ${c.dim}${label}${c.reset}  ${line.substring(0, 80)}`,
+            ts: 0,
+            display: `          ${c.dim}${label}${c.reset}  ${line.substring(0, 80)}`,
           });
         }
       }
@@ -1271,7 +1543,7 @@ async function cmdMonitor() {
   }
 
   lines
-    .sort((a, b) => (a.ts > b.ts ? 1 : -1))
+    .sort((a, b) => a.ts - b.ts)
     .slice(-20)
     .forEach((l) => console.log(l.display));
 }
@@ -1506,34 +1778,35 @@ export async function runDashboard(client) {
   });
 
   let running = true;
+  let inCommand = false;
 
   rl.prompt();
 
   rl.on("line", async (line) => {
-    const input = line.trim();
-    if (!input) {
-      rl.prompt();
-      return;
-    }
-
-    if (input === "/") {
-      console.log("");
-      for (const cmd of COMMANDS.filter((c) => c.group !== "Advanced")) {
-        console.log(
-          `  ${c.cyan}${cmd.name.padEnd(14)}${c.reset}  ${c.dim}${cmd.desc}${c.reset}`,
-        );
-      }
-      console.log("");
-      rl.prompt();
-      return;
-    }
-
-    const cmd = findCommand(input);
-    const args = input.replace(/^\/\S+\s*/, "");
-
-    console.log("");
-
+    if (inCommand) return;
+    inCommand = true;
+    
     try {
+      const input = line.trim();
+      if (!input) {
+        return;
+      }
+
+      if (input === "/") {
+        console.log("");
+        for (const cmd of COMMANDS.filter((c) => c.group !== "Advanced")) {
+          console.log(
+            `  ${c.cyan}${cmd.name.padEnd(14)}${c.reset}  ${c.dim}${cmd.desc}${c.reset}`,
+          );
+        }
+        return;
+      }
+
+      const cmd = findCommand(input);
+      const args = input.replace(/^\/\S+\s*/, "");
+
+      console.log("");
+
       if (!cmd && input.startsWith("/")) {
         const partial = input.split(/\s+/)[0];
         const filtered = filterCommands(partial);
@@ -1570,10 +1843,22 @@ export async function runDashboard(client) {
         dim("  Type /help for commands, or /run to run a task.");
       } else {
         switch (cmd.name) {
+          case "/automations":
+          case "/a":
+            await cmdAutomations(client, rl, orchestrator);
+            break;
+          case "/automate":
+            cmdAutomate();
+            break;
+          case "/about":
+            cmdAbout();
+            break;
           case "/run":
-            await cmdRun(client, rl, orchestrator);
+          case "/r":
+            await cmdRun(client, rl, orchestrator, args);
             break;
           case "/workflow":
+          case "/wf":
             await cmdWorkflow(client, rl, orchestrator);
             break;
           case "/schedule":
@@ -1595,9 +1880,12 @@ export async function runDashboard(client) {
             await cmdWorkers(client);
             break;
           case "/monitor":
+          case "/logs":
+          case "/l":
             await cmdMonitor();
             break;
           case "/status":
+          case "/s":
             await cmdStatus(client, orchestrator);
             break;
           case "/doctor":
@@ -1610,6 +1898,8 @@ export async function runDashboard(client) {
             cmdConfig();
             break;
           case "/help":
+          case "/h":
+          case "/?":
             cmdHelp(args);
             break;
           case "/clear":
@@ -1625,10 +1915,13 @@ export async function runDashboard(client) {
       }
     } catch (e) {
       error(`Unexpected error: ${e.message}`);
+    } finally {
+      if (running) {
+        console.log("");
+        rl.prompt();
+      }
+      inCommand = false;
     }
-
-    console.log("");
-    if (running) rl.prompt();
   });
 
   rl.on("close", () => {
@@ -1638,7 +1931,7 @@ export async function runDashboard(client) {
   });
 
   rl.on("SIGINT", () => {
-    if (running) {
+    if (running && !inCommand) {
       console.log("");
       rl.prompt();
     }

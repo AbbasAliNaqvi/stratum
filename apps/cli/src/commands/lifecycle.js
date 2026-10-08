@@ -452,12 +452,28 @@ export function registerLifecycleCommands(program, { client }) {
 
         console.log(`\nWorkers: ${health.activeWorkers} online\n`);
         if (res.nodes && res.nodes.length > 0) {
-          console.log("ID".padEnd(30) + "Status".padEnd(10) + "Last Heartbeat");
+          console.log("NODE".padEnd(34) + "STATUS".padEnd(13) + "HEARTBEAT");
           for (const node of res.nodes) {
+            const isHealthy = node.status === "registered";
+            const icon = isHealthy ? "●" : "○";
+            const displayStatus = isHealthy ? "healthy" : node.status;
+            let heartbeatStr = "never";
+            
+            if (node.lastHeartbeatAt) {
+              const dt = new Date(node.lastHeartbeatAt).getTime();
+              if (!isNaN(dt)) {
+                const diff = Math.floor((Date.now() - dt) / 1000);
+                if (diff < 60) heartbeatStr = `${diff}s ago`;
+                else if (diff < 3600) heartbeatStr = `${Math.floor(diff / 60)}m ago`;
+                else if (diff < 86400) heartbeatStr = `${Math.floor(diff / 3600)}h ago`;
+                else heartbeatStr = `${Math.floor(diff / 86400)}d ago`;
+              }
+            }
+            
             console.log(
-              node.nodeId.padEnd(30) +
-                node.status.padEnd(10) +
-                new Date(node.lastHeartbeat).toISOString(),
+              `${icon} ${node.nodeId}`.padEnd(34) +
+                displayStatus.padEnd(13) +
+                heartbeatStr
             );
           }
         }

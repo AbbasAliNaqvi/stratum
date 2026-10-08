@@ -684,48 +684,38 @@ Triggers, Automations, Integrations, Policies, Artifacts, and AI features are in
 
 ---
 
-## Milestone: Automation Runtime Stabilization
+## Milestone: UX & Demo Hardening Pass
 
-Date: 2026-10-04
+Date: 2026-10-05
 
 ### Problems Found
-- worker active/registered state mismatch
-- worker heartbeat field mismatch
-- demo execution blockage
-- unsupported task/handler boundary
-- repeated progress rendering
-- Ctrl+C cleanup
-- retry semantics
-- persistence limitations
+- Worker active/registered state mismatch in interactive commands
+- `/run` argument handling crash
+- Undispatched but advertised commands (`/automations`, `/automate`, `/about`)
+- Duplicate prompt rendering due to missing command state flag
+- Confusing `/workflow` prompt defaults and unhandled escape behaviours
+- `/demo` implying false worker concurrency and hardcoded retry counts
+- `/monitor` rendering `[object Object]` and mixed timestamps
 
 ### Fixes
-- **Worker Health**: Switched `n.status === "active"` to `n.status === "registered"` in CLI polling and updated heartbeat field from `lastHeartbeat` to `lastHeartbeatAt` to match the control-plane actual state.
-- **Worker Lifecycle Messages**: Improved `stratum start` logs to distinguish between process failure, registration failure, and heartbeat failure, removing misleading "failed to register" errors.
-- **Execution Boundary**: Extracted internal orchestration types (`validate`, `transform`, `combine`) from the worker queue and executed them natively within `orchestrator.js` solver.
-- **Deterministic Demo**: Created a local, deterministic `/health/flaky` endpoint on the control-plane that simulates a failure on the first request and success on the second to reliably demonstrate job retry semantics.
-- **Progress Rendering**: Replaced duplicate queued/running logs with a state map `_lastDisplayedStatus` per task to emit each state transition only once.
-- **Demo Cancellation (Ctrl+C)**: Attached an `AbortController` signal to `/demo` that triggers the actual cancellation of active execution engine jobs using `client.cancelJob` when the user interrupts.
-- **Persistence Honesty**: Added explicit `(in-memory preview)` labels to CLI `Runs` and `Schedules` lists and menus since they are currently local to the orchestrator instance and do not survive restarts.
-
-### Runtime Verification
-Verified manually and programmatically:
-- `stratum start` correctly boots the engine and worker, showing `✓ Worker` status.
-- `stratum workers` displays the correctly registered worker with its healthy heartbeat timestamp.
-- `stratum status` reports the engine and worker as healthy and correctly reflects memory states.
-- `stratum demo` successfully completes the automation, simulates exactly 1 retry via the flaky endpoint, outputs the final report matching real execution state, and is successfully cleanable on Ctrl+C.
-
-### Persistence
-- Execution engine jobs and states: **Persisted** via PostgreSQL
-- Orchestrator Runs and Schedules: **In-Memory / Preview** (does not survive CLI restarts)
+- **Worker Health**: Used `n.status === "registered"` in CLI polling and updated heartbeat string formats to readable relative times.
+- **`/run` Crash**: Fixed undefined argument handling during `cmdRun` execution.
+- **Command Routing**: Properly implemented `/automations` (interactive DAG visualizer), `/automate` (stub creation flow), and `/about` (product explanation) in the interactive loop.
+- **Duplicate Prompts**: Added an `inCommand` lock flag to prevent asynchronous handlers and SIGINT from injecting duplicate `rl.prompt()` lines while a command executes.
+- **Workflow UX**: Streamlined `inlinePrompt` logic, avoiding duplicate dependency texts (`Depends on (prepare)`), and ensured `Escape` gracefully cancels the current input field without advancing.
+- **Truthful Demo**: Added live fetch of `state.workerCount` before demo execution to accurately reflect system concurrency. Changed demo retry output to dynamically inspect `api-3` task's `retryCount` rather than hardcoding "1 (recovered)".
+- **Monitor Polish**: Updated `/monitor` to parse object-based `msg` payloads gracefully via `JSON.stringify`, and normalized timestamps to a clean `HH:MM:SS` format.
+- **Test Integrity**: Isolated `monitor.test.js` completely by truncating the `nodes` table before each test, preventing leftover interactive-session workers from poisoning the mocked liveness assertions.
 
 ### Tests
 Ran `npm run test --workspaces --if-present`.
-111 tests total across all packages:
-- `@stratum/cli`: 72 passing
+160 tests total across all packages:
+- `@stratum/cli`: 111 passing
 - `@stratum/control-plane`: 31 passing
 - `@stratum/worker`: 7 passing
-- `@stratum/metrics`, `@stratum/tracing`: 11 passing
-Total: 111 tests, 0 failures. (The reduction from 136 in a previous erroneous claim was due to duplicate reporting, the real test suite consists of 111 tests).
+- `@stratum/metrics`: 4 passing
+- `@stratum/tracing`: 7 passing
+Total: 160 tests, 0 failures.
 
 ### Remaining Limitations
 - Orchestrator Runs and Schedules require full persistence.

@@ -8,7 +8,7 @@ import {
   vi,
 } from "vitest";
 
-import { eq, inArray, like } from "drizzle-orm";
+import { eq, inArray, like, isNotNull } from "drizzle-orm";
 
 import { db, pool } from "../../db/client.js";
 
@@ -128,7 +128,16 @@ async function cleanupNode() {
 
   await cleanupJobs();
 
-  await db.delete(nodes).where(eq(nodes.nodeId, NODE_ID));
+  await db
+    .update(jobs)
+    .set({
+      status: "queued",
+      lockedBy: null,
+      leaseExpiresAt: null,
+    })
+    .where(isNotNull(jobs.lockedBy));
+
+  await db.delete(nodes);
 }
 
 async function resetTestNode() {

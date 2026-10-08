@@ -1,38 +1,52 @@
-# STRATUM
+# STRATUM — AI-Native Automation & Orchestration Platform
 
-## Automation & Orchestration Platform
+STRATUM is a developer platform for defining automation workflows, coordinating multi-step DAG executions, scheduling recurring automation runs, and reliably executing tasks across distributed workers.
 
-STRATUM is a developer automation and orchestration platform for running tasks, coordinating multi-step workflows, scheduling recurring execution, and reliably executing work across distributed workers.
+## Interfaces
 
-## Documentation
-
-📖 **User Guide:** [docs/HOW_TO_USE_STRATUM.md](docs/HOW_TO_USE_STRATUM.md) - Start here if you are new to Stratum!
+* **STRATUM CLI** (`apps/cli`) → Developer terminal interface & interactive control panel.
+* **STRATUM Web Console** (`apps/web`) → Visual control, DAG visualizer, & observability interface.
+* **STRATUM Control Plane API** (`apps/control-plane`) → Shared backend API & state manager.
 
 ## Quick Start
 
-Stratum provides a unified CLI to manage its components automatically.
-
 ```bash
-# 1. Install
+# 1. Install dependencies
 npm install
 npm link
 
 # 2. Initialize (connects to DB, runs migrations, starts services)
 stratum init
 
-# 3. Open the Control Panel
+# 3. Start Web Console (in separate terminal)
+npm run dev:web
+
+# 4. Open Interactive CLI
 stratum
 ```
 
 ## Architecture
 
 ```text
+       Browser / Web Console (apps/web)
+                      ↓
+        Control Plane API (apps/control-plane)
+                      ↓
+                  PostgreSQL
+                      ↓
+       Execution Engine & Orchestrator
+                      ↓
+           Workers (apps/worker)
+```
+
+```text
 stratum/
 ├── apps/
-│   ├── cli/              # Command-line interface
-│   ├── control-plane/    # Fastify API server
-│   └── worker/           # Job execution worker
-├── packages/             # Shared packages
+│   ├── cli/              # Command-line interface & terminal control
+│   ├── control-plane/    # Fastify API server & state protocol
+│   ├── web/              # React + Vite visual web console
+│   └── worker/           # Distributed job execution worker
+├── packages/             # Shared packages (metrics, tracing, logger, config, contracts)
 ├── infrastructure/       # Infrastructure configs
 ├── scripts/              # Utility scripts
 ├── tests/                # Integration tests
@@ -62,6 +76,21 @@ The control plane is a Fastify HTTP server that manages nodes and jobs.
 | `GET` | `/nodes` | List all registered nodes |
 | `GET` | `/nodes/:nodeId` | Get node details |
 | `POST` | `/nodes/:nodeId/heartbeat` | Send heartbeat from a worker |
+
+#### Automation APIs
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/automations` | Create a new automation |
+| `GET` | `/automations` | List all automations |
+| `GET` | `/automations/:id` | Get automation details |
+| `POST` | `/automations/:id/runs` | Trigger a new run for an automation |
+| `GET` | `/automations/:id/runs` | List runs for a specific automation |
+| `GET` | `/runs` | List all runs |
+| `GET` | `/runs/:id` | Get run details |
+| `POST` | `/runs/:id/cancel` | Cancel an execution run |
+| `POST` | `/schedules` | Create a new schedule |
+| `GET` | `/schedules` | List active schedules |
 
 #### Job APIs
 

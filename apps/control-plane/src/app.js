@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { LogController } from "fastify";
+import cors from "@fastify/cors";
 
 import { logger } from "@stratum/logger";
 import { registry } from "@stratum/metrics";
@@ -8,6 +9,8 @@ import { healthRoutes } from "./modules/health/routes.js";
 import { nodeRoutes } from "./modules/nodes/routes.js";
 import { jobRoutes } from "./modules/jobs/routes.js";
 import { metricsRoutes } from "./modules/metrics/routes.js";
+import { automationRoutes } from "./modules/automations/routes.js";
+import { scheduleRoutes } from "./modules/schedules/routes.js";
 
 const httpRequestsTotal = registry.counter({
   name: "stratum_http_requests_total",
@@ -31,6 +34,8 @@ export function buildApp() {
     loggerInstance: logger,
     logController: new StratumLogController(),
   });
+
+  app.register(cors, { origin: true });
 
   app.addHook("onRequest", (request, reply, done) => {
     const traceparent = request.headers["traceparent"];
@@ -95,6 +100,8 @@ export function buildApp() {
   app.register(nodeRoutes);
   app.register(jobRoutes);
   app.register(metricsRoutes);
+  app.register(automationRoutes);
+  app.register(scheduleRoutes);
 
   return app;
 }
