@@ -199,3 +199,46 @@ export const schedules = pgTable("schedules", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const agentSessions = pgTable("agent_sessions", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const agentMessages = pgTable("agent_messages", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => agentSessions.id, { onDelete: 'cascade' }),
+  role: text("role").notNull(),
+  content: text("content"),
+  plan: jsonb("plan"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const agentToolCalls = pgTable("agent_tool_calls", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => agentSessions.id, { onDelete: 'cascade' }),
+  messageId: text("message_id").references(() => agentMessages.id, { onDelete: 'cascade' }),
+  toolName: text("tool_name").notNull(),
+  arguments: jsonb("arguments"),
+  result: jsonb("result"),
+  status: text("status").notNull().default("executed"),
+  riskLevel: text("risk_level").notNull().default("READ"),
+  durationMs: integer("duration_ms"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const agentApprovals = pgTable("agent_approvals", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => agentSessions.id, { onDelete: 'cascade' }),
+  toolCallId: text("tool_call_id"),
+  toolName: text("tool_name").notNull(),
+  arguments: jsonb("arguments"),
+  riskLevel: text("risk_level").notNull(),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

@@ -11,6 +11,7 @@ import { jobRoutes } from "./modules/jobs/routes.js";
 import { metricsRoutes } from "./modules/metrics/routes.js";
 import { automationRoutes } from "./modules/automations/routes.js";
 import { scheduleRoutes } from "./modules/schedules/routes.js";
+import { agentRoutes } from "./modules/agent/routes.js";
 
 const httpRequestsTotal = registry.counter({
   name: "stratum_http_requests_total",
@@ -102,6 +103,7 @@ export function buildApp() {
   app.register(metricsRoutes);
   app.register(automationRoutes);
   app.register(scheduleRoutes);
+  app.register(agentRoutes);
 
   return app;
 }

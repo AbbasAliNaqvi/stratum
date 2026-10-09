@@ -24,7 +24,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "commander": "^14.0.3",

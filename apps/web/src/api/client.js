@@ -202,3 +202,54 @@ export async function getAllEvents(limit = 100) {
 export async function getMetrics() {
   return request("/metrics");
 }
+
+export async function getAgentConfig() {
+  return request("/agent/config");
+}
+
+export async function getAgentSessions() {
+  const data = await request("/agent/sessions");
+  return data.sessions || [];
+}
+
+export async function getAgentSession(id) {
+  const data = await request(`/agent/sessions/${id}`);
+  return data.session;
+}
+
+export async function createAgentSession(title) {
+  const res = await request("/agent/sessions", {
+    method: "POST",
+    body: JSON.stringify({ title }),
+  });
+  return res.session;
+}
+
+export async function sendAgentMessage(sessionId, content) {
+  const res = await request(`/agent/sessions/${sessionId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+  return res.session;
+}
+
+export async function getPendingApprovals(sessionId) {
+  const queryStr = sessionId ? `?sessionId=${sessionId}` : "";
+  const data = await request(`/agent/approvals${queryStr}`);
+  return data.approvals || [];
+}
+
+export async function approveAgentAction(id) {
+  const res = await request(`/agent/approvals/${id}/approve`, {
+    method: "POST",
+  });
+  return res.session;
+}
+
+export async function rejectAgentAction(id, reason) {
+  const res = await request(`/agent/approvals/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+  return res.session;
+}

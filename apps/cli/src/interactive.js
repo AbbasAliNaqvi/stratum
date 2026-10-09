@@ -1597,39 +1597,116 @@ async function cmdDoctor(client) {
 
 /* ── /model command ────────────────────────────────────── */
 
-function cmdModel() {
+async function cmdModel(client) {
   heading("Intelligence");
 
-  const provider = process.env.STRATUM_AI_PROVIDER || "none";
-  const model = process.env.STRATUM_AI_MODEL || "—";
-  const hasKey = !!process.env.GROQ_API_KEY;
+  let cfg = { enabled: false, provider: "mock", model: "gpt-4o", toolCount: 18, policy: "Controlled" };
+  try {
+    cfg = await client.getAgentConfig();
+  } catch {}
 
-  if (provider === "none" && !hasKey) {
-    dim("  No AI model configured.");
+  console.log(
+    kvPanel([
+      ["AI Runtime Status", cfg.enabled ? `${c.green}${sym.dot} Enabled${c.reset}` : `${c.yellow}${sym.circle} Disabled (Mock Provider Active)${c.reset}`],
+      ["Provider", cfg.provider || "openai"],
+      ["Model", cfg.model || "gpt-4o"],
+      ["Tools Registered", String(cfg.toolCount || 18)],
+      ["Policy Engine", cfg.policy || "Controlled"],
+    ]),
+  );
+
+  if (!cfg.enabled) {
     console.log("");
-    dim("  AI-powered diagnostics and smart scheduling");
-    dim("  will be available in a future release.");
-    console.log("");
-    console.log(
-      kvPanel([
-        ["STRATUM_AI_PROVIDER", "groq | openai | none"],
-        ["STRATUM_AI_MODEL", "e.g. llama-3.3-70b-versatile"],
-        ["GROQ_API_KEY", "your API key"],
-      ]),
-    );
-  } else {
-    console.log(
-      kvPanel([
-        ["Provider", provider],
-        ["Model", model],
-        [
-          "API Key",
-          hasKey
-            ? `${c.green}configured${c.reset}`
-            : `${c.red}missing${c.reset}`,
-        ],
-      ]),
-    );
+    dim("  Set STRATUM_AI_ENABLED=true to enable production LLM models.");
+  }
+}
+
+async function cmdAgent(client, rl, goalInput) {
+  heading("STRATUM AI Agent");
+
+  let goal = goalInput ? goalInput.trim() : "";
+  if (!goal) {
+    console.log(`  ${c.dim}Enter natural language goal or question for the AI Agent:${c.reset}`);
+    goal = await new Promise((res) => {
+      rl.question(`  ${c.cyan}${sym.arrow}${c.reset} `, (ans) => res(ans.trim()));
+    });
+  }
+
+  if (!goal) return;
+
+  const spinner = createSpinner("Initializing Agent runtime loop...");
+  try {
+    const sessRes = await client.createAgentSession(`Goal: ${goal.substring(0, 30)}`);
+    const sessionId = sessRes.session.id;
+
+    spinner.setText("Agent inspecting system state and formulating plan...");
+    const sessionRes = await client.sendAgentMessage(sessionId, goal);
+    spinner.stop();
+
+    const session = sessionRes.session;
+
+    // Output Messages & Plans
+    for (const msg of session.messages || []) {
+      if (msg.role === "assistant" && msg.content) {
+        console.log(`\n  ${c.bold}STRATUM Agent:${c.reset}\n`);
+        console.log(`  ${msg.content.replace(/\n/g, "\n  ")}\n`);
+      }
+
+      if (msg.plan && msg.plan.length > 0) {
+        console.log(`  ${c.bold}Plan Checklist:${c.reset}`);
+        for (const p of msg.plan) {
+          const icon = p.status === "completed" ? `${c.green}✓${c.reset}` : `${c.yellow}⟳${c.reset}`;
+          console.log(`    ${icon} ${p.title}`);
+        }
+        console.log("");
+      }
+    }
+
+    // Output Tool Calls
+    if (session.toolCalls && session.toolCalls.length > 0) {
+      console.log(`  ${c.bold}Tool Activity Log:${c.reset}`);
+      for (const tc of session.toolCalls) {
+        const statusStr = tc.status === "executed" || tc.status === "approved"
+          ? `${c.green}✓ ${tc.status}${c.reset}`
+          : tc.status === "waiting_approval"
+            ? `${c.yellow}! approval required${c.reset}`
+            : `${c.red}✗ ${tc.status}${c.reset}`;
+        console.log(`    ${statusStr}  ${c.cyan}${tc.toolName}${c.reset}  ${c.dim}${tc.durationMs ? tc.durationMs + "ms" : ""}${c.reset}`);
+      }
+      console.log("");
+    }
+
+    // Handle Pending Approvals
+    if (session.pendingApprovals && session.pendingApprovals.length > 0) {
+      for (const appr of session.pendingApprovals) {
+        console.log(`  ${c.yellow}${c.bold}POLICY APPROVAL REQUIRED${c.reset}`);
+        console.log(`  Operation: ${c.bold}${appr.toolName}${c.reset} (${appr.riskLevel})`);
+        console.log(`  Reason:    ${appr.reason}\n`);
+
+        const answer = await new Promise((res) => {
+          rl.question(`  Approve execution? [y/N]: `, (ans) => res(ans.trim().toLowerCase()));
+        });
+
+        if (answer === "y" || answer === "yes") {
+          const apprSpinner = createSpinner("Executing approved action...");
+          const resSess = await client.approveAgentAction(appr.id);
+          apprSpinner.stop();
+          success("Action approved and executed.");
+          if (resSess.session?.messages) {
+            const lastMsg = resSess.session.messages[resSess.session.messages.length - 1];
+            if (lastMsg && lastMsg.content) {
+              console.log(`\n  ${lastMsg.content}\n`);
+            }
+          }
+        } else {
+          await client.rejectAgentAction(appr.id, "Rejected by CLI user");
+          warn("Action rejected.");
+        }
+      }
+    }
+  } catch (err) {
+    spinner.stop();
+    error(`Agent error: ${err.message}`);
   }
 }
 
@@ -1891,8 +1968,12 @@ export async function runDashboard(client) {
           case "/doctor":
             await cmdDoctor(client);
             break;
+          case "/agent":
+          case "/ask":
+            await cmdAgent(client, rl, args);
+            break;
           case "/model":
-            cmdModel();
+            await cmdModel(client);
             break;
           case "/config":
             cmdConfig();

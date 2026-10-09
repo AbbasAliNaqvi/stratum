@@ -187,6 +187,41 @@ export function createClient() {
       });
     },
 
+    async getAgentConfig() {
+      return request("/agent/config");
+    },
+
+    async createAgentSession(title) {
+      return request("/agent/sessions", {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      });
+    },
+
+    async getAgentSession(id) {
+      return request(`/agent/sessions/${encodeURIComponent(id)}`);
+    },
+
+    async sendAgentMessage(sessionId, content) {
+      return request(`/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      });
+    },
+
+    async approveAgentAction(id) {
+      return request(`/agent/approvals/${encodeURIComponent(id)}/approve`, {
+        method: "POST",
+      });
+    },
+
+    async rejectAgentAction(id, reason) {
+      return request(`/agent/approvals/${encodeURIComponent(id)}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
+    },
+
     baseUrl: config.CONTROL_PLANE_URL,
   };
 }
