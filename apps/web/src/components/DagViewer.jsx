@@ -4,8 +4,9 @@ import { CheckCircle2, XCircle, RefreshCw, Clock, ArrowDown, Play, CornerDownRig
 export function DagViewer({ steps = [], stepStates = {}, onSelectStep }) {
   if (!steps || steps.length === 0) {
     return (
-      <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)", border: "1px dashed var(--border-color)", borderRadius: 8 }}>
-        No steps defined in this automation workflow DAG.
+      <div className="empty-state">
+        <Play size={32} className="empty-state-icon" style={{ opacity: 0.5 }} />
+        <p>No steps defined in this automation workflow.</p>
       </div>
     );
   }
@@ -50,80 +51,77 @@ export function DagViewer({ steps = [], stepStates = {}, onSelectStep }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", alignItems: "center", padding: "1rem 0" }}>
       {/* Start Node */}
-      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.4rem 1rem", borderRadius: 20, background: "rgba(59, 130, 246, 0.15)", border: "1px solid rgba(59, 130, 246, 0.4)", color: "#60a5fa", fontSize: "0.8rem", fontWeight: 700 }}>
-        <Play size={12} fill="#60a5fa" />
-        START
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.4rem 1rem", borderRadius: 6, background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text-secondary)", fontSize: "0.75rem", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+        <Play size={12} />
+        Start
       </div>
 
-      <ArrowDown size={16} style={{ color: "var(--text-muted)" }} />
+      <ArrowDown size={18} style={{ color: "var(--color-text-muted)", opacity: 0.5 }} />
 
       {/* Levels */}
       {sortedLevels.map((lvlKey, lvlIdx) => {
         const levelSteps = levels[lvlKey];
         return (
           <React.Fragment key={lvlKey}>
-            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1.25rem", width: "100%", maxWidth: 800 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1.5rem", width: "100%", maxWidth: 900 }}>
               {levelSteps.map(step => {
                 const state = stepStates[step.id] || {};
                 const status = state.status || "queued";
                 
-                let borderColor = "var(--border-color)";
-                let bgStyle = "var(--bg-surface)";
-                let statusIcon = <Clock size={16} style={{ color: "var(--text-muted)" }} />;
+                let borderColor = "var(--color-border)";
+                let bgStyle = "var(--color-surface)";
+                let statusIcon = <Clock size={16} style={{ color: "var(--color-text-muted)" }} />;
 
                 if (status === "succeeded") {
-                  borderColor = "#10b981";
-                  bgStyle = "rgba(16, 185, 129, 0.05)";
-                  statusIcon = <CheckCircle2 size={16} style={{ color: "#10b981" }} />;
+                  borderColor = "var(--color-success)";
+                  statusIcon = <CheckCircle2 size={16} style={{ color: "var(--color-success)" }} />;
                 } else if (status === "running") {
-                  borderColor = "#3b82f6";
-                  bgStyle = "rgba(59, 130, 246, 0.08)";
-                  statusIcon = <RefreshCw size={16} className="animate-spin" style={{ color: "#3b82f6" }} />;
+                  borderColor = "var(--color-primary)";
+                  statusIcon = <RefreshCw size={16} className="animate-spin-slow" style={{ color: "var(--color-primary)" }} />;
                 } else if (status === "failed") {
-                  borderColor = "#ef4444";
-                  bgStyle = "rgba(239, 68, 68, 0.08)";
-                  statusIcon = <XCircle size={16} style={{ color: "#ef4444" }} />;
+                  borderColor = "var(--color-error)";
+                  statusIcon = <XCircle size={16} style={{ color: "var(--color-error)" }} />;
                 }
 
                 return (
                   <div
                     key={step.id}
                     onClick={() => onSelectStep && onSelectStep(step)}
+                    className="card-interactive"
                     style={{
-                      flex: "1 1 220px",
-                      maxWidth: 280,
+                      flex: "1 1 240px",
+                      maxWidth: 320,
                       padding: "1rem",
-                      borderRadius: 8,
-                      border: `1.5px solid ${borderColor}`,
+                      borderRadius: 6,
+                      border: `1px solid ${borderColor}`,
                       background: bgStyle,
                       cursor: onSelectStep ? "pointer" : "default",
-                      transition: "transform 0.15s ease, box-shadow 0.15s ease",
-                      boxShadow: status === "running" ? "0 0 15px rgba(59, 130, 246, 0.2)" : "none",
+                      boxShadow: status === "running" ? "0 0 0 2px rgba(37, 99, 235, 0.1)" : "0 1px 2px rgba(0,0,0,0.02)",
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                      <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--text-primary)" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
+                      <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--color-text-primary)" }}>
                         {step.id}
                       </span>
                       {statusIcon}
                     </div>
 
-                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.5rem" }}>
-                      <span className="badge badge-info" style={{ fontSize: "0.65rem", padding: "0.15rem 0.4rem" }}>
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem" }}>
+                      <span className="badge font-mono" style={{ fontSize: "0.7rem", background: "rgba(229, 234, 245, 0.1)" }}>
                         {step.type}
                       </span>
                     </div>
 
                     {step.dependsOn && step.dependsOn.length > 0 && (
-                      <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.25rem", marginTop: "0.4rem" }}>
-                        <CornerDownRight size={10} />
-                        Depends: {step.dependsOn.join(", ")}
+                      <div style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", display: "flex", alignItems: "center", gap: "0.35rem", marginTop: "0.5rem" }}>
+                        <CornerDownRight size={12} style={{ opacity: 0.7 }} />
+                        Depends: <span style={{ color: "var(--color-text-primary)" }}>{step.dependsOn.join(", ")}</span>
                       </div>
                     )}
 
                     {state.jobId && (
-                      <div style={{ fontSize: "0.65rem", fontFamily: "JetBrains Mono", color: "var(--text-muted)", marginTop: "0.4rem" }}>
-                        Job: {state.jobId.slice(0, 8)}...
+                      <div style={{ fontSize: "0.7rem", fontFamily: "JetBrains Mono", color: "var(--color-text-secondary)", marginTop: "0.75rem", padding: "0.2rem 0.4rem", borderRadius: 4, background: "var(--color-background)", border: "1px solid var(--color-border)", display: "inline-block" }}>
+                        Job: {state.jobId.slice(0, 8)}
                       </div>
                     )}
                   </div>
@@ -132,7 +130,7 @@ export function DagViewer({ steps = [], stepStates = {}, onSelectStep }) {
             </div>
 
             {lvlIdx < sortedLevels.length - 1 && (
-              <ArrowDown size={16} style={{ color: "var(--text-muted)" }} />
+              <ArrowDown size={18} style={{ color: "var(--color-text-muted)", opacity: 0.5 }} />
             )}
           </React.Fragment>
         );

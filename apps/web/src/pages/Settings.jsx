@@ -27,21 +27,23 @@ export function Settings({ onUpdateUrl }) {
   };
 
   return (
-    <div style={{ maxWidth: 700, margin: "0 auto", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-      <div className="card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <Server size={20} style={{ color: "var(--accent-blue)" }} />
+    <div className="animate-in" style={{ maxWidth: 700, margin: "0 auto", display: "flex", flexDirection: "column", gap: "1.5rem", paddingTop: "2rem" }}>
+      <div className="card" style={{ display: "flex", flexDirection: "column", gap: "1.5rem", padding: "2rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(160, 210, 235, 0.15)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-primary)" }}>
+            <Server size={20} />
+          </div>
           <div>
-            <h2 style={{ fontSize: "1.1rem", fontWeight: 700 }}>Control Plane Connection</h2>
-            <p style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+            <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--color-text-primary)", letterSpacing: "-0.01em" }}>Control Plane Connection</h2>
+            <p style={{ fontSize: "0.85rem", color: "var(--color-text-secondary)", marginTop: "0.25rem" }}>
               Configure the STRATUM Control Plane API URL
             </p>
           </div>
         </div>
 
-        <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
           <div>
-            <label style={{ display: "block", fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.25rem", fontWeight: 600 }}>
+            <label style={{ display: "block", fontSize: "0.85rem", color: "var(--color-text-secondary)", marginBottom: "0.5rem", fontWeight: 500 }}>
               STRATUM_CONTROL_PLANE_URL
             </label>
             <input
@@ -51,18 +53,19 @@ export function Settings({ onUpdateUrl }) {
               onChange={(e) => setUrl(e.target.value)}
               placeholder="http://localhost:3000"
               required
+              style={{ fontSize: "0.9rem" }}
             />
           </div>
 
           {status && (
             <div
               style={{
-                padding: "0.75rem 1rem",
-                borderRadius: 6,
+                padding: "1rem",
+                borderRadius: 8,
                 fontSize: "0.85rem",
-                background: status.ok ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
-                border: `1px solid ${status.ok ? "rgba(16, 185, 129, 0.3)" : "rgba(239, 68, 68, 0.3)"}`,
-                color: status.ok ? "#34d399" : "#f87171",
+                background: status.ok ? "rgba(46, 204, 113, 0.1)" : "rgba(248, 113, 113, 0.1)",
+                border: `1px solid ${status.ok ? "rgba(46, 204, 113, 0.2)" : "rgba(248, 113, 113, 0.2)"}`,
+                color: status.ok ? "var(--color-success)" : "var(--color-error)",
                 display: "flex",
                 alignItems: "center",
                 gap: "0.5rem",
@@ -73,9 +76,9 @@ export function Settings({ onUpdateUrl }) {
             </div>
           )}
 
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button type="submit" disabled={testing} className="btn btn-primary btn-sm">
-              <Save size={14} /> {testing ? "Testing..." : "Save & Test Connection"}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.5rem" }}>
+            <button type="submit" disabled={testing} className="btn btn-primary" style={{ padding: "0.6rem 1.25rem" }}>
+              <Save size={16} /> {testing ? "Testing..." : "Save & Test Connection"}
             </button>
           </div>
         </form>

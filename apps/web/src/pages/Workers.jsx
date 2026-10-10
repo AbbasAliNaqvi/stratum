@@ -14,28 +14,29 @@ function formatRelativeTime(isoString) {
 
 export function Workers({ workers = [], jobs = [], onRefresh }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+    <div className="animate-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem", maxWidth: 1200, margin: "0 auto" }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <h2 style={{ fontSize: "1.25rem", fontWeight: 800 }}>Registered Execution Workers</h2>
-          <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-            Distributed worker nodes heartbeat and execution workload
-          </p>
+          <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--color-text-primary)", letterSpacing: "-0.02em" }}>Registered Execution Workers</h2>
         </div>
 
-        <button onClick={onRefresh} className="btn btn-secondary btn-sm">
+        <button onClick={onRefresh} className="btn btn-secondary btn-sm" style={{ gap: "0.4rem" }}>
           <RefreshCw size={14} /> Refresh
         </button>
       </div>
 
       {/* Grid of Workers */}
       {workers.length === 0 ? (
-        <div className="card" style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)" }}>
-          No worker nodes currently registered with the control plane.
+        <div className="empty-state">
+          <Cpu size={48} className="empty-state-icon" style={{ opacity: 0.6 }} />
+          <h3>No workers available</h3>
+          <p>
+            There is currently no execution capacity. Please check the STRATUM runtime logs and start a worker node.
+          </p>
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "1.25rem" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: "1.25rem" }}>
           {workers.map((worker) => {
             const activeJobs = jobs.filter(
               (j) => j.lockedBy === worker.nodeId && j.status === "running"
@@ -55,47 +56,48 @@ export function Workers({ workers = [], jobs = [], onRefresh }) {
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: "1rem",
-                  borderColor: isUnreachable ? "rgba(239, 68, 68, 0.4)" : undefined,
+                  gap: "1.25rem",
+                  borderColor: isUnreachable ? "rgba(248, 113, 113, 0.4)" : undefined,
+                  boxShadow: isUnreachable ? "0 0 12px rgba(248, 113, 113, 0.15)" : undefined,
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
-                    <h3 className="font-mono" style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-primary)" }}>
+                    <h3 className="font-mono" style={{ fontSize: "1rem", fontWeight: 700, color: "var(--color-primary)" }}>
                       {worker.nodeId}
                     </h3>
-                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "0.35rem", marginTop: "0.2rem" }}>
-                      <Server size={12} /> {worker.hostname}
+                    <div style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "0.35rem" }}>
+                      <Server size={14} style={{ color: "var(--color-tertiary)" }} /> {worker.hostname}
                     </div>
                   </div>
                   <StatusBadge status={displayStatus} />
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", padding: "0.75rem", borderRadius: 6, background: "var(--bg-elevated)", fontSize: "0.8rem" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", padding: "1rem", borderRadius: 8, background: "var(--color-surface-elevated)", border: "1px solid var(--color-border-glass)", fontSize: "0.85rem" }}>
                   <div>
-                    <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>Heartbeat</div>
-                    <div style={{ fontWeight: 600 }}>{formatRelativeTime(worker.lastHeartbeatAt)}</div>
+                    <div style={{ color: "var(--color-text-muted)", fontSize: "0.7rem", marginBottom: "0.25rem" }}>Heartbeat</div>
+                    <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>{formatRelativeTime(worker.lastHeartbeatAt)}</div>
                   </div>
 
                   <div>
-                    <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>Current Workload</div>
-                    <div style={{ fontWeight: 700, color: activeJobs > 0 ? "var(--accent-blue)" : "var(--text-primary)" }}>
+                    <div style={{ color: "var(--color-text-muted)", fontSize: "0.7rem", marginBottom: "0.25rem" }}>Current Workload</div>
+                    <div style={{ fontWeight: 700, color: activeJobs > 0 ? "var(--color-success)" : "var(--color-text-primary)" }}>
                       {activeJobs} running jobs
                     </div>
                   </div>
 
                   <div>
-                    <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>CPU Cores</div>
-                    <div style={{ fontWeight: 600 }}>{worker.cpuCores} cores</div>
+                    <div style={{ color: "var(--color-text-muted)", fontSize: "0.7rem", marginBottom: "0.25rem" }}>CPU Cores</div>
+                    <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>{worker.cpuCores} cores</div>
                   </div>
 
                   <div>
-                    <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>Memory</div>
-                    <div style={{ fontWeight: 600 }}>{worker.memoryMb} MB</div>
+                    <div style={{ color: "var(--color-text-muted)", fontSize: "0.7rem", marginBottom: "0.25rem" }}>Memory</div>
+                    <div style={{ fontWeight: 600, color: "var(--color-text-primary)" }}>{worker.memoryMb} MB</div>
                   </div>
                 </div>
 
-                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", display: "flex", justifyContent: "space-between" }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", display: "flex", justifyContent: "space-between", paddingTop: "0.5rem", borderTop: "1px dashed var(--color-border-glass)" }}>
                   <span>Platform: {worker.platform || "darwin/linux"}</span>
                   <span>Registered: {new Date(worker.createdAt).toLocaleDateString()}</span>
                 </div>

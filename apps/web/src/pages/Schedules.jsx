@@ -26,29 +26,26 @@ export function Schedules({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+    <div className="animate-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem", maxWidth: 1200, margin: "0 auto" }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <h2 style={{ fontSize: "1.25rem", fontWeight: 800 }}>Automation Schedules</h2>
-          <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-            Durable recurring trigger schedules
-          </p>
+          <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--color-text-primary)", letterSpacing: "-0.02em" }}>Automation Schedules</h2>
         </div>
 
-        <button onClick={() => setShowModal(true)} className="btn btn-primary">
+        <button onClick={() => setShowModal(true)} className="btn btn-primary" style={{ gap: "0.4rem" }}>
           <Plus size={16} /> Create Schedule
         </button>
       </div>
 
       {/* Modal */}
       {showModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div className="card" style={{ width: 450, maxWidth: "90vw" }}>
-            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "1rem" }}>Create Recurring Schedule</h3>
-            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(11, 15, 25, 0.8)", backdropFilter: "blur(12px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="card animate-in" style={{ width: 450, maxWidth: "90vw", padding: "2rem", boxShadow: "0 24px 48px rgba(0,0,0,0.4)" }}>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "1.5rem", color: "var(--color-text-primary)" }}>Create Recurring Schedule</h3>
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
               <div>
-                <label style={{ display: "block", fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.25rem", fontWeight: 600 }}>
+                <label style={{ display: "block", fontSize: "0.85rem", color: "var(--color-text-secondary)", marginBottom: "0.4rem", fontWeight: 500 }}>
                   Automation
                 </label>
                 <select
@@ -65,7 +62,7 @@ export function Schedules({
               </div>
 
               <div>
-                <label style={{ display: "block", fontSize: "0.8rem", color: "var(--text-secondary)", marginBottom: "0.25rem", fontWeight: 600 }}>
+                <label style={{ display: "block", fontSize: "0.85rem", color: "var(--color-text-secondary)", marginBottom: "0.4rem", fontWeight: 500 }}>
                   Interval
                 </label>
                 <select
@@ -82,11 +79,11 @@ export function Schedules({
                 </select>
               </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.5rem" }}>
-                <button type="button" onClick={() => setShowModal(false)} className="btn btn-secondary btn-sm">
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", marginTop: "1rem" }}>
+                <button type="button" onClick={() => setShowModal(false)} className="btn btn-secondary">
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary btn-sm">
+                <button type="submit" className="btn btn-primary">
                   Save Schedule
                 </button>
               </div>
@@ -98,8 +95,15 @@ export function Schedules({
       {/* Schedules Table */}
       <div className="card">
         {schedules.length === 0 ? (
-          <div style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)" }}>
-            No active schedules configured.
+          <div className="empty-state">
+            <Calendar size={48} className="empty-state-icon" style={{ opacity: 0.6 }} />
+            <h3>No active schedules</h3>
+            <p>
+              Create a recurring trigger to run your automations automatically on an interval.
+            </p>
+            <button onClick={() => setShowModal(true)} className="btn btn-primary" style={{ marginTop: "1rem" }}>
+              Create Schedule
+            </button>
           </div>
         ) : (
           <div className="table-container">
@@ -107,12 +111,12 @@ export function Schedules({
               <thead>
                 <tr>
                   <th>Schedule ID</th>
-                  <th>Automation ID</th>
+                  <th>Automation</th>
                   <th>Interval</th>
                   <th>Next Run</th>
                   <th>Last Run</th>
                   <th>Status</th>
-                  <th>Actions</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -120,41 +124,41 @@ export function Schedules({
                   const auto = automations.find((a) => a.id === sched.automationId);
                   return (
                     <tr key={sched.id}>
-                      <td className="font-mono">{sched.id}</td>
+                      <td className="font-mono" style={{ fontSize: "0.8rem", color: "var(--color-primary)" }}>{sched.id}</td>
                       <td>
-                        <div style={{ fontWeight: 600 }}>{auto?.name || sched.automationId}</div>
-                        <div className="font-mono" style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{sched.automationId}</div>
+                        <div style={{ fontWeight: 500 }}>{auto?.name || sched.automationId}</div>
+                        <div className="font-mono" style={{ fontSize: "0.7rem", color: "var(--color-text-muted)", marginTop: "0.2rem" }}>{sched.automationId}</div>
                       </td>
                       <td>
-                        <span className="badge badge-secondary font-mono" style={{ fontSize: "0.7rem" }}>
+                        <span className="badge" style={{ background: "rgba(229, 234, 245, 0.05)", fontSize: "0.75rem" }}>
                           {sched.intervalMs ? `${sched.intervalMs / 1000}s` : sched.type}
                         </span>
                       </td>
-                      <td>{sched.nextRunAt ? new Date(sched.nextRunAt).toLocaleTimeString() : "—"}</td>
-                      <td>{sched.lastRunAt ? new Date(sched.lastRunAt).toLocaleTimeString() : "Never"}</td>
+                      <td style={{ color: "var(--color-text-secondary)" }}>{sched.nextRunAt ? new Date(sched.nextRunAt).toLocaleTimeString() : "—"}</td>
+                      <td style={{ color: "var(--color-text-secondary)" }}>{sched.lastRunAt ? new Date(sched.lastRunAt).toLocaleTimeString() : "Never"}</td>
                       <td><StatusBadge status={sched.enabled ? "enabled" : "disabled"} /></td>
                       <td>
-                        <div style={{ display: "flex", gap: "0.4rem" }}>
+                        <div style={{ display: "flex", gap: "0.4rem", justifyContent: "flex-end" }}>
                           <button
                             onClick={() => onRunNow(sched.automationId)}
                             className="btn btn-primary btn-sm"
                             title="Run immediately"
                           >
-                            <Play size={12} /> Run Now
+                            <Play size={14} /> Run
                           </button>
                           <button
                             onClick={() => onToggleEnable(sched.id, !sched.enabled)}
                             className="btn btn-secondary btn-sm"
                             title={sched.enabled ? "Disable schedule" : "Enable schedule"}
                           >
-                            <Power size={12} style={{ color: sched.enabled ? "#f59e0b" : "#10b981" }} />
+                            <Power size={14} style={{ color: sched.enabled ? "var(--color-warning)" : "var(--color-success)" }} />
                           </button>
                           <button
                             onClick={() => onDeleteSchedule(sched.id)}
                             className="btn btn-danger btn-sm"
                             title="Delete schedule"
                           >
-                            <Trash2 size={12} />
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </td>

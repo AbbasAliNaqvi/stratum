@@ -30,10 +30,19 @@ class StratumLogController extends LogController {
   }
 }
 
+import { startOrchestrator, stopOrchestrator } from "./modules/automations/orchestrator.js";
+
 export function buildApp() {
   const app = Fastify({
     loggerInstance: logger,
     logController: new StratumLogController(),
+  });
+  
+  startOrchestrator();
+  
+  app.addHook("onClose", (instance, done) => {
+    stopOrchestrator();
+    done();
   });
 
   app.register(cors, { origin: true });

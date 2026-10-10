@@ -18,6 +18,12 @@ export function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const [selectedAutomationId, setSelectedAutomationId] = useState(null);
   const [selectedRunId, setSelectedRunId] = useState(null);
+  
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem("stratum_view_mode") || "simple");
+
+  useEffect(() => {
+    localStorage.setItem("stratum_view_mode", viewMode);
+  }, [viewMode]);
 
   const [health, setHealth] = useState({ ok: false, endpoint: api.getBaseUrl() });
   const [automations, setAutomations] = useState([]);
@@ -132,6 +138,8 @@ export function App() {
       setActiveTab={(tab) => handleNavigate(tab)}
       health={health}
       onRefresh={refreshAllData}
+      viewMode={viewMode}
+      setViewMode={setViewMode}
     >
       {activeTab === "overview" && (
         <Overview
@@ -139,6 +147,8 @@ export function App() {
           automations={automations}
           runs={runs}
           jobs={jobs}
+          health={health}
+          viewMode={viewMode}
           onNavigate={handleNavigate}
           onRunAutomation={handleRunAutomation}
         />
@@ -147,6 +157,7 @@ export function App() {
       {activeTab === "automations" && (
         <Automations
           automations={automations}
+          viewMode={viewMode}
           onNavigate={handleNavigate}
           onRun={handleRunAutomation}
           onToggleEnable={handleToggleEnableAutomation}
@@ -157,6 +168,7 @@ export function App() {
       {activeTab === "automation_detail" && (
         <AutomationDetail
           automation={currentAutomation}
+          viewMode={viewMode}
           onNavigate={handleNavigate}
           onRun={handleRunAutomation}
           onToggleEnable={handleToggleEnableAutomation}
@@ -167,6 +179,7 @@ export function App() {
 
       {activeTab === "create_automation" && (
         <CreateAutomation
+          viewMode={viewMode}
           onNavigate={handleNavigate}
           onCreate={handleCreateAutomation}
         />
@@ -175,6 +188,8 @@ export function App() {
       {activeTab === "runs" && (
         <Runs
           runs={runs}
+          automations={automations}
+          viewMode={viewMode}
           onSelectRun={(id) => handleNavigate("run_detail", id)}
           onRefresh={refreshAllData}
         />
@@ -183,6 +198,7 @@ export function App() {
       {activeTab === "run_detail" && (
         <LiveRunView
           runId={selectedRunId}
+          viewMode={viewMode}
           onNavigate={handleNavigate}
         />
       )}
@@ -218,7 +234,7 @@ export function App() {
       )}
 
       {activeTab === "agent" && (
-        <Agent />
+        <Agent viewMode={viewMode} />
       )}
 
       {activeTab === "settings" && (
